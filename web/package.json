@@ -1,0 +1,31 @@
+{
+  "name": "csda-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@base-ui-components/react": "^1.0.0-rc.0",
+    "@tailwindcss/vite": "^4.3.2",
+    "@vitejs/plugin-react": "latest",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "geist": "^1.7.2",
+    "lucide-react": "^1.24.0",
+    "react": "latest",
+    "react-dom": "latest",
+    "tailwind-merge": "^3.6.0",
+    "tailwindcss": "^4.3.2",
+    "tailwindcss-animate": "^1.0.7",
+    "typescript": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest"
+  }
+}

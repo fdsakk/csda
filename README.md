@@ -36,6 +36,35 @@ Export a demo in a specific folder into a minified JSON file including entities 
 
 `csda -demo-path=/path/to/myDemo.dem -output=/path/to/folder -format=json -positions -minify`
 
+### Multi-demo player statistics
+
+Build a persistent SQLite database from individual demos and folders. Players are merged by SteamID and demos are deduplicated by checksum.
+
+```bash
+csda stats ingest --db=player-stats.db --demo=match1.dem --demo-dir=./demos
+csda stats report --db=player-stats.db --output=./stats-report --format=csv
+```
+
+`stats build` combines both operations. The report contains aggregated player and weapon statistics, estimated Time to Damage (TTD), estimated Reaction Time, a configurable suspicion score, and evidence rows pointing to demo rounds and ticks. The score is intended to prioritize manual review; it is not an automatic cheating verdict.
+
+TTD measures the first spotted tick to first damage. Reaction Time measures the first spotted tick to first shot. In both cases three consecutive spotted ticks are required to validate the exposure, but timing starts at the first tick; samples outside `0–1000 ms` are excluded. The primary multi-demo value is the round-weighted average of each demo's median, while pooled median and P10 remain available in JSON/CSV. These are demo-derived estimates, not geometry-backed line-of-sight measurements.
+
+Use `--config=thresholds.json` to override fields returned by `api.DefaultSuspicionConfig()`. A player receives a score after at least three demos and 100 firearm shots by default.
+
+### Local React dashboard
+
+Build the web interface and start the local Go server:
+
+```bash
+cd web
+npm install
+npm run build
+cd ..
+csda web --db=player-stats.db --uploads=uploads --assets=web/dist --source=valve
+```
+
+Open `http://127.0.0.1:8080`. Drop one or more `.dem` files into the upload area; uploads are stored under `uploads`, analyzed sequentially in the background, deduplicated by checksum, and added to the same SQLite player database. The table refreshes automatically after each completed job.
+
 ## API
 
 ### GO API

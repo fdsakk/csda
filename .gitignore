@@ -9,3 +9,11 @@ node_modules
 /*.json
 /debug/*.json
 .vscode/launch.json
+
+# runtime artifacts
+/csda
+/uploads/
+*.db
+*.dem
+/sample-demos/
+/sample-analysis/

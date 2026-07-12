@@ -68,6 +68,12 @@ func (cli *cliArgs) fromArgs(args []string) error {
 }
 
 func Run(args []string) int {
+	if len(args) > 0 && args[0] == "stats" {
+		return runStats(args[1:])
+	}
+	if len(args) > 0 && args[0] == "web" {
+		return runWeb(args[1:])
+	}
 	var cli cliArgs
 	err := cli.fromArgs(args)
 	if err != nil {

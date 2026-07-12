@@ -58,11 +58,13 @@ type Analyzer struct {
 	// to detect which player is untying an hostage in case of consecutive events.
 	playersUntyingAnHostage map[uint64]int
 	chickenEntities         []st.Entity
+	playerStatsCollector    *demoStatsCollector
 }
 
 type AnalyzeDemoOptions struct {
 	IncludePositions bool
 	Source           constants.DemoSource
+	statsCollector   *demoStatsCollector
 }
 
 func analyzeDemo(demoPath string, options AnalyzeDemoOptions) (*Match, error) {
@@ -122,6 +124,7 @@ func analyzeDemo(demoPath string, options AnalyzeDemoOptions) (*Match, error) {
 		lastGrenadeThrownByPlayer: make(map[uint64]*Shot),
 		playersUntyingAnHostage:   make(map[uint64]int),
 		postProcess:               defaultPostProcess,
+		playerStatsCollector:      options.statsCollector,
 	}
 
 	analyzer.currentRound = &Round{
@@ -216,6 +219,9 @@ func analyzeDemo(demoPath string, options AnalyzeDemoOptions) (*Match, error) {
 	analyzer.postProcess(analyzer)
 	match.deleteIncompleteRounds()
 	match.computeResultStats()
+	if analyzer.playerStatsCollector != nil {
+		analyzer.playerStatsCollector.finalize(&match)
+	}
 
 	return &match, nil
 }
@@ -647,10 +653,16 @@ func (analyzer *Analyzer) registerCommonHandlers(includePositions bool) {
 		damage := newDamageFromGameEvent(analyzer, event)
 		if damage != nil {
 			match.Damages = append(match.Damages, damage)
+			if analyzer.playerStatsCollector != nil {
+				analyzer.playerStatsCollector.onDamage(analyzer, damage)
+			}
 		}
 	})
 
 	parser.RegisterEventHandler(func(event events.FrameDone) {
+		if analyzer.playerStatsCollector != nil && analyzer.matchStarted() {
+			analyzer.playerStatsCollector.onFrame(analyzer)
+		}
 		shouldComputeEconomy := analyzer.lastFreezeTimeEndTick != -1 && analyzer.secondsHasPassedSinceTick(equipmentValueDelaySeconds, analyzer.lastFreezeTimeEndTick)
 		if shouldComputeEconomy {
 			analyzer.computePlayersEconomies()
@@ -845,6 +857,9 @@ func (analyzer *Analyzer) registerCommonHandlers(includePositions bool) {
 		}
 
 		match.Shots = append(match.Shots, shot)
+		if analyzer.playerStatsCollector != nil {
+			analyzer.playerStatsCollector.onShot(analyzer, shot)
+		}
 	})
 
 	parser.RegisterEventHandler(func(event events.BombPlanted) {
