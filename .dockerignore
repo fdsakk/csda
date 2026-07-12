@@ -1,0 +1,10 @@
+.git
+web/node_modules
+web/dist
+uploads
+sample-demos
+sample-analysis
+*.db
+*.dem
+csda
+docs

@@ -1,0 +1,12 @@
+services:
+  csda:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      # Database and uploaded demos persist across restarts.
+      - csda-data:/data
+    restart: unless-stopped
+
+volumes:
+  csda-data:
