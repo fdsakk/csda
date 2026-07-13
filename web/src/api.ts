@@ -36,11 +36,27 @@ export type Player = {
   triggeredRules: Rule[] | null;
 };
 
+export type Demo = {
+  checksum: string;
+  path: string;
+  fileName: string;
+  mapName: string;
+  date: string;
+  tickRate: number;
+  buildNumber: number;
+  source: string;
+  analysisVersion: number;
+  importedAt: string;
+  enabled: boolean;
+  players: number;
+  rounds: number;
+};
+
 export type Report = {
   players: Player[] | null;
   playersByWeapon: unknown[] | null;
   evidence: unknown[] | null;
-  importedDemos: unknown[] | null;
+  importedDemos: Demo[] | null;
 };
 
 export type Job = {
@@ -68,6 +84,22 @@ export async function getReport(): Promise<Report> {
 
 export async function getJobs(): Promise<Job[]> {
   return readJSON<Job[]>(await fetch('/api/jobs'));
+}
+
+export async function setDemoEnabled(checksum: string, enabled: boolean): Promise<void> {
+  const response = await fetch(`/api/demos/${encodeURIComponent(checksum)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ error: undefined }));
+    throw new Error(body.error ?? `Request failed: ${response.status}`);
+  }
+}
+
+export async function importStats(file: File): Promise<{ imported: number; skipped: number }> {
+  return readJSON(await fetch('/api/import', { method: 'POST', body: file }));
 }
 
 export function uploadDemos(files: File[], source: string, onProgress: (progress: number) => void): Promise<Job> {

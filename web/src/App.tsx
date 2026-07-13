@@ -1,6 +1,6 @@
 import { DragEvent, Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, ChevronDown, ExternalLink, Search, Upload, X } from 'lucide-react';
-import { getJobs, getReport, Job, Player, Report, uploadDemos } from './api';
+import { ArrowDown, ArrowUp, ChevronDown, ExternalLink, FileDown, FileUp, Search, Upload, X } from 'lucide-react';
+import { Demo, getJobs, getReport, importStats, Job, Player, Report, setDemoEnabled, uploadDemos } from './api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -343,6 +343,91 @@ function PlayerTable({ players }: { players: Player[] }) {
   );
 }
 
+function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => void }) {
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState<string | null>(null);
+  const [message, setMessage] = useState('');
+  const [failed, setFailed] = useState(false);
+  const enabledCount = demos.filter((demo) => demo.enabled).length;
+
+  const report = (text: string, isError: boolean) => { setMessage(text); setFailed(isError); };
+
+  const toggle = async (demo: Demo) => {
+    setPending(demo.checksum);
+    try { await setDemoEnabled(demo.checksum, !demo.enabled); setMessage(''); onChanged(); }
+    catch (cause) { report(cause instanceof Error ? cause.message : 'Toggle failed', true); }
+    finally { setPending(null); }
+  };
+
+  const importFile = async (file: File) => {
+    try {
+      const result = await importStats(file);
+      report(`Imported ${result.imported} demo${result.imported === 1 ? '' : 's'}, skipped ${result.skipped} already known.`, false);
+      onChanged();
+    } catch (cause) { report(cause instanceof Error ? cause.message : 'Import failed', true); }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">Demos</h2>
+          <p className="text-sm text-muted-foreground">{demos.length} demo{demos.length === 1 ? '' : 's'} · {enabledCount} included in stats</p>
+        </div>
+        <div className="flex gap-2">
+          <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.target.value = ''; }} />
+          <Button variant="outline" size="sm" onClick={() => fileInput.current?.click()}>
+            <FileUp className="size-4" /> Import
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => { window.location.href = '/api/export'; }}>
+            <FileDown className="size-4" /> Export
+          </Button>
+        </div>
+      </div>
+
+      {message ? <p className={cn('text-sm', failed ? 'text-destructive' : 'text-muted-foreground')}>{message}</p> : null}
+
+      {demos.length ? (
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <Table className="min-w-[760px]">
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                {['In stats', 'File', 'Map', 'Played', 'Source', 'Players', 'Rounds', 'Added'].map((label) => (
+                  <TableHead key={label} className="bg-muted/40">{label}</TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {demos.map((demo) => (
+                <TableRow key={demo.checksum} className={cn(!demo.enabled && 'opacity-50')}>
+                  <TableCell>
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-primary"
+                      checked={demo.enabled}
+                      disabled={pending === demo.checksum}
+                      onChange={() => void toggle(demo)}
+                    />
+                  </TableCell>
+                  <TableCell className="font-medium">{demo.fileName}</TableCell>
+                  <TableCell>{demo.mapName}</TableCell>
+                  <TableCell className="tabular-nums">{demo.date ? new Date(demo.date).toLocaleDateString() : '—'}</TableCell>
+                  <TableCell>{demo.source}</TableCell>
+                  <TableCell className="tabular-nums">{demo.players}</TableCell>
+                  <TableCell className="tabular-nums">{demo.rounds}</TableCell>
+                  <TableCell className="tabular-nums">{demo.importedAt ? new Date(demo.importedAt).toLocaleDateString() : '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-border py-10 text-center text-sm text-muted-foreground">No demos analyzed yet.</div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [report, setReport] = useState<Report>(EMPTY_REPORT);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -387,7 +472,10 @@ export default function App() {
       {loading ? (
         <div className="py-20 text-center text-sm text-muted-foreground">Loading…</div>
       ) : (
-        <PlayerTable players={players} />
+        <>
+          <PlayerTable players={players} />
+          <DemosSection demos={report.importedDemos ?? []} onChanged={() => void loadAll()} />
+        </>
       )}
     </div>
   );
