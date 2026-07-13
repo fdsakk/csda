@@ -92,6 +92,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/report", s.handleReport)
 	s.mux.HandleFunc("GET /api/jobs", s.handleJobs)
 	s.mux.HandleFunc("POST /api/uploads", s.handleUpload)
+	s.mux.HandleFunc("PATCH /api/demos/{checksum}", s.handleDemoToggle)
+	s.mux.HandleFunc("GET /api/export", s.handleExport)
+	s.mux.HandleFunc("POST /api/import", s.handleImport)
 	s.mux.HandleFunc("/", s.handleStatic)
 }
 
@@ -226,6 +229,53 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		cleanup()
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "server is shutting down"})
 	}
+}
+
+const maxImportBytes int64 = 1 << 30
+
+func (s *Server) handleDemoToggle(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Enabled == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `expected JSON body with "enabled" boolean`})
+		return
+	}
+	err := api.SetDemoEnabled(r.Context(), s.options.DatabasePath, r.PathValue("checksum"), *body.Enabled)
+	if errors.Is(err, api.ErrDemoNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "demo not found"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	export, err := api.ExportPlayerStatsData(r.Context(), s.options.DatabasePath)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Disposition", `attachment; filename="player-stats-export.json"`)
+	writeJSON(w, http.StatusOK, export)
+}
+
+func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportBytes)
+	var payload api.PlayerStatsExport
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	result, err := api.ImportPlayerStatsData(r.Context(), s.options.DatabasePath, &payload)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) worker() {
