@@ -380,7 +380,14 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
   const [pending, setPending] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [failed, setFailed] = useState(false);
+  const [pageSize, setPageSize] = useState(12);
+  const [page, setPage] = useState(0);
+  const [showAll, setShowAll] = useState(false);
   const enabledCount = demos.filter((demo) => demo.enabled).length;
+
+  const pageCount = Math.max(1, Math.ceil(demos.length / pageSize));
+  const currentPage = Math.min(page, pageCount - 1);
+  const visible = showAll ? demos : demos.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
 
   const report = (text: string, isError: boolean) => { setMessage(text); setFailed(isError); };
 
@@ -408,19 +415,29 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
           </Button>
         }
       />
-      <DialogContent>
+      <DialogContent className="max-w-6xl px-16 py-12">
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 pr-8">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <DialogTitle>Demos</DialogTitle>
+              <DialogTitle className="text-2xl">Demos</DialogTitle>
               <p className="text-sm text-muted-foreground">{demos.length} demo{demos.length === 1 ? '' : 's'} · {enabledCount} included in stats</p>
             </div>
             <div className="flex gap-2">
+              {demos.length ? (
+                <Select value={String(pageSize)} onValueChange={(value) => { setPageSize(Number(value)); setShowAll(false); setPage(0); }}>
+                  <SelectTrigger className="h-9 w-32"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZES.map((size) => (
+                      <SelectItem key={size} value={String(size)}>{size} / page</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
               <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.target.value = ''; }} />
-              <Button variant="outline" size="sm" onClick={() => fileInput.current?.click()}>
+              <Button variant="outline" size="sm" className="h-9" onClick={() => fileInput.current?.click()}>
                 <FileUp className="size-4" /> Import
               </Button>
-              <Button variant="outline" size="sm" onClick={() => { window.location.href = '/api/export'; }}>
+              <Button variant="outline" size="sm" className="h-9" onClick={() => { window.location.href = '/api/export'; }}>
                 <FileDown className="size-4" /> Export
               </Button>
             </div>
@@ -429,39 +446,63 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
           {message ? <p className={cn('text-sm', failed ? 'text-destructive' : 'text-muted-foreground')}>{message}</p> : null}
 
           {demos.length ? (
-            <div className="max-h-[60vh] overflow-auto rounded-lg border border-border">
-              <Table className="min-w-[760px]">
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    {['In stats', 'File', 'Map', 'Played', 'Source', 'Players', 'Rounds', 'Added'].map((label) => (
-                      <TableHead key={label} className="bg-muted/40">{label}</TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {demos.map((demo) => (
-                    <TableRow key={demo.checksum} className={cn(!demo.enabled && 'opacity-50')}>
-                      <TableCell>
-                        <input
-                          type="checkbox"
-                          className="size-4 accent-primary"
-                          checked={demo.enabled}
-                          disabled={pending === demo.checksum}
-                          onChange={() => void toggle(demo)}
-                        />
-                      </TableCell>
-                      <TableCell className="font-medium">{demo.fileName}</TableCell>
-                      <TableCell>{demo.mapName}</TableCell>
-                      <TableCell className="tabular-nums">{demo.date ? new Date(demo.date).toLocaleDateString() : '—'}</TableCell>
-                      <TableCell>{demo.source}</TableCell>
-                      <TableCell className="tabular-nums">{demo.players}</TableCell>
-                      <TableCell className="tabular-nums">{demo.rounds}</TableCell>
-                      <TableCell className="tabular-nums">{demo.importedAt ? new Date(demo.importedAt).toLocaleDateString() : '—'}</TableCell>
+            <>
+              <div className="max-h-[60vh] overflow-auto rounded-lg border border-border">
+                <Table className="min-w-[760px]">
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      {['In stats', 'File', 'Map', 'Played', 'Source', 'Players', 'Rounds', 'Added'].map((label) => (
+                        <TableHead key={label} className="bg-muted/40">{label}</TableHead>
+                      ))}
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {visible.map((demo) => (
+                      <TableRow key={demo.checksum} className={cn(!demo.enabled && 'opacity-50')}>
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            className="size-4 accent-primary"
+                            checked={demo.enabled}
+                            disabled={pending === demo.checksum}
+                            onChange={() => void toggle(demo)}
+                          />
+                        </TableCell>
+                        <TableCell className="font-medium">{demo.fileName}</TableCell>
+                        <TableCell>{demo.mapName}</TableCell>
+                        <TableCell className="tabular-nums">{demo.date ? new Date(demo.date).toLocaleDateString() : '—'}</TableCell>
+                        <TableCell>{demo.source}</TableCell>
+                        <TableCell className="tabular-nums">{demo.players}</TableCell>
+                        <TableCell className="tabular-nums">{demo.rounds}</TableCell>
+                        <TableCell className="tabular-nums">{demo.importedAt ? new Date(demo.importedAt).toLocaleDateString() : '—'}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-muted-foreground">{demos.length} demos</p>
+                <div className="flex items-center gap-2">
+                  {!showAll && pageCount > 1 ? (
+                    <>
+                      <Button variant="outline" size="sm" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
+                        <ChevronLeft className="size-4" />
+                      </Button>
+                      <span className="text-sm tabular-nums text-muted-foreground">{currentPage + 1} / {pageCount}</span>
+                      <Button variant="outline" size="sm" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}>
+                        <ChevronRight className="size-4" />
+                      </Button>
+                    </>
+                  ) : null}
+                  {demos.length > pageSize ? (
+                    <Button variant="ghost" size="sm" onClick={() => { setShowAll((value) => !value); setPage(0); }}>
+                      {showAll ? 'Show pages' : 'Show all'}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            </>
           ) : (
             <div className="rounded-lg border border-border py-10 text-center text-sm text-muted-foreground">No demos analyzed yet.</div>
           )}

@@ -11,7 +11,7 @@ const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof BaseDialog.Popup>
 >(({ className, children, ...props }, ref) => (
   <BaseDialog.Portal>
-    <BaseDialog.Backdrop className="fixed inset-0 z-40 bg-black/50 transition-opacity data-[starting-style]:opacity-0 data-[ending-style]:opacity-0" />
+    <BaseDialog.Backdrop className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm transition-opacity data-[starting-style]:opacity-0 data-[ending-style]:opacity-0" />
     <BaseDialog.Popup
       ref={ref}
       className={cn(
