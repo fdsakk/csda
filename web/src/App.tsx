@@ -208,7 +208,7 @@ function PlayerDetails({ player }: { player: Player }) {
   );
 }
 
-const PAGE_SIZE = 25;
+const PAGE_SIZES = [12, 25, 50, 100];
 
 const COLUMNS: { key: SortKey | null; label: string }[] = [
   { key: 'name', label: 'Player' },
@@ -226,8 +226,7 @@ function PlayerTable({ players }: { players: Player[] }) {
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
   const [status, setStatus] = useState<StatusFilter>('all');
-  const [minDemos, setMinDemos] = useState('');
-  const [minAccuracy, setMinAccuracy] = useState('');
+  const [pageSize, setPageSize] = useState(12);
   const [sortKey, setSortKey] = useState<SortKey>('suspicionScore');
   const [ascending, setAscending] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -235,32 +234,30 @@ function PlayerTable({ players }: { players: Player[] }) {
   const [showAll, setShowAll] = useState(false);
 
   const shown = useMemo(() => {
-    const demoFloor = Number(minDemos) || 0;
-    const accFloor = (Number(minAccuracy) || 0) / 100;
     return players.filter((player) => {
       const matchesText = !deferredQuery || player.name.toLowerCase().includes(deferredQuery) || String(player.steamId).includes(deferredQuery);
       const matchesStatus = status === 'all' || (status === 'flagged' ? FLAGGED.includes(player.status) : player.status === status);
-      return matchesText && matchesStatus && player.demoCount >= demoFloor && player.accuracy >= accFloor;
+      return matchesText && matchesStatus;
     }).toSorted((a, b) => {
       const av = a[sortKey], bv = b[sortKey];
       const order = typeof av === 'string' ? av.localeCompare(String(bv)) : Number(av) - Number(bv);
       return ascending ? order : -order;
     });
-  }, [players, deferredQuery, status, minDemos, minAccuracy, sortKey, ascending]);
+  }, [players, deferredQuery, status, sortKey, ascending]);
 
   const sort = (key: SortKey) => {
     if (sortKey === key) setAscending((value) => !value);
     else { setSortKey(key); setAscending(key === 'name'); }
   };
 
-  useEffect(() => { setPage(0); }, [deferredQuery, status, minDemos, minAccuracy, sortKey, ascending]);
+  useEffect(() => { setPage(0); }, [deferredQuery, status, sortKey, ascending, pageSize]);
 
-  const hasFilters = query || status !== 'all' || minDemos || minAccuracy;
-  const reset = () => { setQuery(''); setStatus('all'); setMinDemos(''); setMinAccuracy(''); setPage(0); };
+  const hasFilters = query || status !== 'all';
+  const reset = () => { setQuery(''); setStatus('all'); setPage(0); };
 
-  const pageCount = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(shown.length / pageSize));
   const currentPage = Math.min(page, pageCount - 1);
-  const visible = showAll ? shown : shown.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+  const visible = showAll ? shown : shown.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
 
   return (
     <div className="space-y-4">
@@ -281,8 +278,14 @@ function PlayerTable({ players }: { players: Player[] }) {
             <SelectItem value="insufficient_sample">Low sample</SelectItem>
           </SelectContent>
         </Select>
-        <Input type="number" min={0} value={minDemos} onChange={(event) => setMinDemos(event.target.value)} placeholder="Min demos" className="w-28" />
-        <Input type="number" min={0} max={100} value={minAccuracy} onChange={(event) => setMinAccuracy(event.target.value)} placeholder="Min acc %" className="w-28" />
+        <Select value={String(pageSize)} onValueChange={(value) => { setPageSize(Number(value)); setShowAll(false); }}>
+          <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {PAGE_SIZES.map((size) => (
+              <SelectItem key={size} value={String(size)}>{size} / page</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         {hasFilters ? <Button variant="ghost" size="sm" onClick={reset}>Clear</Button> : null}
       </div>
 
@@ -361,7 +364,7 @@ function PlayerTable({ players }: { players: Player[] }) {
               </Button>
             </>
           ) : null}
-          {shown.length > PAGE_SIZE ? (
+          {shown.length > pageSize ? (
             <Button variant="ghost" size="sm" onClick={() => { setShowAll((value) => !value); setPage(0); }}>
               {showAll ? 'Show pages' : 'Show all'}
             </Button>

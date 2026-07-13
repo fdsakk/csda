@@ -16,6 +16,7 @@
     "clsx": "^2.1.1",
     "geist": "^1.7.2",
     "lucide-react": "^1.24.0",
+    "radix-ui": "^1.6.2",
     "react": "latest",
     "react-dom": "latest",
     "tailwind-merge": "^3.6.0",
