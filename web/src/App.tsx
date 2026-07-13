@@ -209,7 +209,6 @@ function PlayerDetails({ player }: { player: Player }) {
 }
 
 const COLUMNS: { key: SortKey | null; label: string }[] = [
-  { key: 'suspicionScore', label: 'Risk' },
   { key: 'name', label: 'Player' },
   { key: 'demoCount', label: 'Demos' },
   { key: 'shots', label: 'Shots' },
@@ -218,7 +217,7 @@ const COLUMNS: { key: SortKey | null; label: string }[] = [
   { key: 'headshotKillRate', label: 'HS kills' },
   { key: 'ttdWeightedMs', label: 'TTD' },
   { key: 'reactionWeightedMs', label: 'Reaction' },
-  { key: null, label: 'Status' },
+  { key: 'suspicionScore', label: 'Status' },
 ];
 
 function PlayerTable({ players }: { players: Player[] }) {
@@ -304,7 +303,6 @@ function PlayerTable({ players }: { players: Player[] }) {
                     className="cursor-pointer"
                     onClick={() => setExpanded((value) => (value === player.steamId ? null : player.steamId))}
                   >
-                    <TableCell className="font-medium tabular-nums">{player.suspicionScore}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1.5 font-medium">
                         {player.name}
