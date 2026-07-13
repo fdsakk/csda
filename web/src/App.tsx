@@ -1,5 +1,5 @@
 import { DragEvent, Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, ChevronDown, ExternalLink, FileDown, FileUp, Film, Search, Upload, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FileUp, Film, Search, Upload, X } from 'lucide-react';
 import { Demo, getJobs, getReport, importStats, Job, Player, Report, setDemoEnabled, uploadDemos } from './api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -208,6 +208,8 @@ function PlayerDetails({ player }: { player: Player }) {
   );
 }
 
+const PAGE_SIZE = 25;
+
 const COLUMNS: { key: SortKey | null; label: string }[] = [
   { key: 'name', label: 'Player' },
   { key: 'demoCount', label: 'Demos' },
@@ -229,6 +231,8 @@ function PlayerTable({ players }: { players: Player[] }) {
   const [sortKey, setSortKey] = useState<SortKey>('suspicionScore');
   const [ascending, setAscending] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [showAll, setShowAll] = useState(false);
 
   const shown = useMemo(() => {
     const demoFloor = Number(minDemos) || 0;
@@ -249,8 +253,14 @@ function PlayerTable({ players }: { players: Player[] }) {
     else { setSortKey(key); setAscending(key === 'name'); }
   };
 
+  useEffect(() => { setPage(0); }, [deferredQuery, status, minDemos, minAccuracy, sortKey, ascending]);
+
   const hasFilters = query || status !== 'all' || minDemos || minAccuracy;
-  const reset = () => { setQuery(''); setStatus('all'); setMinDemos(''); setMinAccuracy(''); };
+  const reset = () => { setQuery(''); setStatus('all'); setMinDemos(''); setMinAccuracy(''); setPage(0); };
+
+  const pageCount = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const visible = showAll ? shown : shown.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
 
   return (
     <div className="space-y-4">
@@ -295,7 +305,7 @@ function PlayerTable({ players }: { players: Player[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {shown.map((player) => {
+            {visible.map((player) => {
               const open = expanded === player.steamId;
               return (
                 <Fragment key={player.steamId}>
@@ -335,9 +345,29 @@ function PlayerTable({ players }: { players: Player[] }) {
         {!shown.length ? <div className="py-14 text-center text-sm text-muted-foreground">No players match these filters.</div> : null}
       </div>
 
-      <p className="text-sm text-muted-foreground">
-        {shown.length} of {players.length} players · click a row for signal detail
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">
+          {shown.length} of {players.length} players · click a row for signal detail
+        </p>
+        <div className="flex items-center gap-2">
+          {!showAll && pageCount > 1 ? (
+            <>
+              <Button variant="outline" size="sm" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
+                <ChevronLeft className="size-4" />
+              </Button>
+              <span className="text-sm tabular-nums text-muted-foreground">{currentPage + 1} / {pageCount}</span>
+              <Button variant="outline" size="sm" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}>
+                <ChevronRight className="size-4" />
+              </Button>
+            </>
+          ) : null}
+          {shown.length > PAGE_SIZE ? (
+            <Button variant="ghost" size="sm" onClick={() => { setShowAll((value) => !value); setPage(0); }}>
+              {showAll ? 'Show pages' : 'Show all'}
+            </Button>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
