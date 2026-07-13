@@ -126,12 +126,17 @@ func (row PlayerEvidenceReportRow) MarshalJSON() ([]byte, error) {
 type ImportedDemoReportRow struct {
 	Checksum        string  `json:"checksum"`
 	Path            string  `json:"path"`
+	FileName        string  `json:"fileName"`
 	MapName         string  `json:"mapName"`
 	Date            string  `json:"date"`
 	TickRate        float64 `json:"tickRate"`
 	BuildNumber     int     `json:"buildNumber"`
 	Source          string  `json:"source"`
 	AnalysisVersion int     `json:"analysisVersion"`
+	ImportedAt      string  `json:"importedAt"`
+	Enabled         bool    `json:"enabled"`
+	Players         int     `json:"players"`
+	Rounds          int     `json:"rounds"`
 }
 
 type PlayerStatsReport struct {
@@ -246,7 +251,7 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 	}
 	report := &PlayerStatsReport{}
 
-	rows, err := db.QueryContext(ctx, `SELECT p.steam_id,p.latest_name,p.names,COUNT(s.demo_id),COALESCE(SUM(s.rounds),0),COALESCE(SUM(s.shots),0),COALESCE(SUM(s.hit_shots),0),COALESCE(SUM(s.damage_events),0),COALESCE(SUM(s.head_hit_events),0),COALESCE(SUM(s.kills),0),COALESCE(SUM(s.headshot_kills),0),COALESCE(SUM(s.smoke_kills),0),COALESCE(SUM(s.wall_kills),0),COALESCE(SUM(s.unspotted_damage_events),0),COALESCE(SUM(s.first_bullet_encounters),0),COALESCE(SUM(s.first_bullet_head_hits),0),COALESCE(SUM(s.snap_events),0),COALESCE(SUM(s.ttd_samples),0),COALESCE(SUM(s.ttd_sum_ms),0),COALESCE(SUM(s.moving_shots),0),COALESCE(SUM(s.moving_hit_shots),0),COALESCE(SUM(s.airborne_shots),0),COALESCE(SUM(s.airborne_hit_shots),0),COALESCE(SUM(s.flashed_shots),0),COALESCE(SUM(s.flashed_hit_shots),0),COALESCE(SUM(s.scoped_shots),0),COALESCE(SUM(s.scoped_hit_shots),0) FROM players p JOIN player_demo_stats s ON s.steam_id=p.steam_id GROUP BY p.steam_id,p.latest_name,p.names ORDER BY p.steam_id`)
+	rows, err := db.QueryContext(ctx, `SELECT p.steam_id,p.latest_name,p.names,COUNT(s.demo_id),COALESCE(SUM(s.rounds),0),COALESCE(SUM(s.shots),0),COALESCE(SUM(s.hit_shots),0),COALESCE(SUM(s.damage_events),0),COALESCE(SUM(s.head_hit_events),0),COALESCE(SUM(s.kills),0),COALESCE(SUM(s.headshot_kills),0),COALESCE(SUM(s.smoke_kills),0),COALESCE(SUM(s.wall_kills),0),COALESCE(SUM(s.unspotted_damage_events),0),COALESCE(SUM(s.first_bullet_encounters),0),COALESCE(SUM(s.first_bullet_head_hits),0),COALESCE(SUM(s.snap_events),0),COALESCE(SUM(s.ttd_samples),0),COALESCE(SUM(s.ttd_sum_ms),0),COALESCE(SUM(s.moving_shots),0),COALESCE(SUM(s.moving_hit_shots),0),COALESCE(SUM(s.airborne_shots),0),COALESCE(SUM(s.airborne_hit_shots),0),COALESCE(SUM(s.flashed_shots),0),COALESCE(SUM(s.flashed_hit_shots),0),COALESCE(SUM(s.scoped_shots),0),COALESCE(SUM(s.scoped_hit_shots),0) FROM players p JOIN player_demo_stats s ON s.steam_id=p.steam_id JOIN demos d ON d.id=s.demo_id AND d.enabled=1 GROUP BY p.steam_id,p.latest_name,p.names ORDER BY p.steam_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +283,7 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 	}
 	for index := range report.Players {
 		row := &report.Players[index]
-		ttdRows, qerr := db.QueryContext(ctx, `SELECT e.demo_id,s.rounds,e.ttd_ms,e.confirmed_angle,e.first_shot_angle FROM encounters e JOIN player_demo_stats s ON s.demo_id=e.demo_id AND s.steam_id=e.attacker_steam_id WHERE e.attacker_steam_id=? AND e.ttd_ms BETWEEN 0 AND 1000 ORDER BY e.ttd_ms`, row.SteamID64)
+		ttdRows, qerr := db.QueryContext(ctx, `SELECT e.demo_id,s.rounds,e.ttd_ms,e.confirmed_angle,e.first_shot_angle FROM encounters e JOIN player_demo_stats s ON s.demo_id=e.demo_id AND s.steam_id=e.attacker_steam_id JOIN demos d ON d.id=e.demo_id AND d.enabled=1 WHERE e.attacker_steam_id=? AND e.ttd_ms BETWEEN 0 AND 1000 ORDER BY e.ttd_ms`, row.SteamID64)
 		if qerr != nil {
 			return nil, qerr
 		}
@@ -325,7 +330,7 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 		row.CrosshairMedianAngle = percentile(crosshairAngles, .5)
 		row.FirstShotMedianAngle = percentile(firstShotAngles, .5)
 
-		reactionRows, reactionErr := db.QueryContext(ctx, `SELECT r.demo_id,s.rounds,r.reaction_time_ms FROM reactions r JOIN player_demo_stats s ON s.demo_id=r.demo_id AND s.steam_id=r.attacker_steam_id WHERE r.attacker_steam_id=? AND r.reaction_time_ms BETWEEN 0 AND 1000 ORDER BY r.reaction_time_ms`, row.SteamID64)
+		reactionRows, reactionErr := db.QueryContext(ctx, `SELECT r.demo_id,s.rounds,r.reaction_time_ms FROM reactions r JOIN player_demo_stats s ON s.demo_id=r.demo_id AND s.steam_id=r.attacker_steam_id JOIN demos d ON d.id=r.demo_id AND d.enabled=1 WHERE r.attacker_steam_id=? AND r.reaction_time_ms BETWEEN 0 AND 1000 ORDER BY r.reaction_time_ms`, row.SteamID64)
 		if reactionErr != nil {
 			return nil, reactionErr
 		}
@@ -361,7 +366,7 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 		scorePlayer(row, config)
 	}
 
-	weaponRows, err := db.QueryContext(ctx, `SELECT w.steam_id,p.latest_name,w.weapon_name,SUM(w.shots),SUM(w.hit_shots),SUM(w.damage_events),SUM(w.head_hit_events),SUM(w.kills) FROM player_demo_weapon_stats w JOIN players p ON p.steam_id=w.steam_id GROUP BY w.steam_id,p.latest_name,w.weapon_name ORDER BY w.steam_id,w.weapon_name`)
+	weaponRows, err := db.QueryContext(ctx, `SELECT w.steam_id,p.latest_name,w.weapon_name,SUM(w.shots),SUM(w.hit_shots),SUM(w.damage_events),SUM(w.head_hit_events),SUM(w.kills) FROM player_demo_weapon_stats w JOIN players p ON p.steam_id=w.steam_id JOIN demos d ON d.id=w.demo_id AND d.enabled=1 GROUP BY w.steam_id,p.latest_name,w.weapon_name ORDER BY w.steam_id,w.weapon_name`)
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +382,7 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 	}
 	weaponRows.Close()
 
-	evidenceRows, err := db.QueryContext(ctx, `SELECT d.checksum,d.path,e.round_number,e.tick,e.steam_id,p.latest_name,e.victim_steam_id,e.kind,e.value,e.details FROM evidence e JOIN demos d ON d.id=e.demo_id LEFT JOIN players p ON p.steam_id=e.steam_id ORDER BY e.steam_id,d.demo_date,e.round_number,e.tick`)
+	evidenceRows, err := db.QueryContext(ctx, `SELECT d.checksum,d.path,e.round_number,e.tick,e.steam_id,p.latest_name,e.victim_steam_id,e.kind,e.value,e.details FROM evidence e JOIN demos d ON d.id=e.demo_id LEFT JOIN players p ON p.steam_id=e.steam_id WHERE d.enabled=1 ORDER BY e.steam_id,d.demo_date,e.round_number,e.tick`)
 	if err != nil {
 		return nil, err
 	}
@@ -391,13 +396,13 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 	}
 	evidenceRows.Close()
 
-	demoRows, err := db.QueryContext(ctx, `SELECT checksum,path,map_name,demo_date,tick_rate,build_number,source,analysis_version FROM demos ORDER BY demo_date,checksum`)
+	demoRows, err := db.QueryContext(ctx, `SELECT d.checksum,d.path,d.file_name,d.map_name,d.demo_date,d.tick_rate,d.build_number,d.source,d.analysis_version,d.imported_at,d.enabled,COUNT(s.steam_id),COALESCE(MAX(s.rounds),0) FROM demos d LEFT JOIN player_demo_stats s ON s.demo_id=d.id GROUP BY d.id ORDER BY d.demo_date,d.checksum`)
 	if err != nil {
 		return nil, err
 	}
 	for demoRows.Next() {
 		var d ImportedDemoReportRow
-		if err := demoRows.Scan(&d.Checksum, &d.Path, &d.MapName, &d.Date, &d.TickRate, &d.BuildNumber, &d.Source, &d.AnalysisVersion); err != nil {
+		if err := demoRows.Scan(&d.Checksum, &d.Path, &d.FileName, &d.MapName, &d.Date, &d.TickRate, &d.BuildNumber, &d.Source, &d.AnalysisVersion, &d.ImportedAt, &d.Enabled, &d.Players, &d.Rounds); err != nil {
 			demoRows.Close()
 			return nil, err
 		}
@@ -490,9 +495,9 @@ func writeEvidenceCSV(path string, rows []PlayerEvidenceReportRow) error {
 	return writeCSV(path, lines)
 }
 func writeDemosCSV(path string, rows []ImportedDemoReportRow) error {
-	lines := [][]string{{"checksum", "path", "map", "date", "tickrate", "build number", "source", "analysis version"}}
+	lines := [][]string{{"checksum", "path", "file name", "map", "date", "tickrate", "build number", "source", "analysis version", "imported at", "enabled", "players", "rounds"}}
 	for _, r := range rows {
-		lines = append(lines, []string{r.Checksum, r.Path, r.MapName, r.Date, f(r.TickRate), i(r.BuildNumber), r.Source, i(r.AnalysisVersion)})
+		lines = append(lines, []string{r.Checksum, r.Path, r.FileName, r.MapName, r.Date, f(r.TickRate), i(r.BuildNumber), r.Source, i(r.AnalysisVersion), r.ImportedAt, strconv.FormatBool(r.Enabled), i(r.Players), i(r.Rounds)})
 	}
 	return writeCSV(path, lines)
 }

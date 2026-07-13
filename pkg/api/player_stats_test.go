@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"math"
 	"path/filepath"
 	"testing"
@@ -134,5 +135,206 @@ func TestStoreReplacesExistingDemoChecksum(t *testing.T) {
 	}
 	if demos != 1 || shots != 25 {
 		t.Fatalf("demos=%d shots=%d, want 1/25", demos, shots)
+	}
+}
+
+func TestDemosEnabledColumnDefaultsToOne(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "stats.db")
+	db, err := openPlayerStatsDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	match := &Match{Checksum: "c1", DemoFilePath: "a.dem", DemoFileName: "a", Date: time.Now(), Source: constants.DemoSourceValve}
+	stats := DemoStats{Players: map[uint64]*DemoPlayerStats{1: {SteamID64: 1, Name: "one", Shots: 10}}, Weapons: map[uint64]map[string]*DemoWeaponStats{}}
+	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+		t.Fatal(err)
+	}
+	var enabled int
+	if err := db.QueryRow(`SELECT enabled FROM demos WHERE checksum='c1'`).Scan(&enabled); err != nil {
+		t.Fatal(err)
+	}
+	if enabled != 1 {
+		t.Fatalf("enabled=%d, want 1", enabled)
+	}
+}
+
+func TestReportExcludesDisabledDemos(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "stats.db")
+	db, err := openPlayerStatsDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steamID := uint64(76561198000000001)
+	for _, checksum := range []string{"d1", "d2"} {
+		match := &Match{Checksum: checksum, DemoFilePath: checksum + ".dem", DemoFileName: checksum, MapName: "de_test", Date: time.Now(), TickRate: 64, Source: constants.DemoSourceValve}
+		stats := DemoStats{
+			Players:    map[uint64]*DemoPlayerStats{steamID: {SteamID64: steamID, Name: "Alice", Rounds: 10, Shots: 50, HitShots: 25}},
+			Weapons:    map[uint64]map[string]*DemoWeaponStats{steamID: {"AK-47": {SteamID64: steamID, WeaponName: "AK-47", Shots: 50, HitShots: 25}}},
+			Encounters: []DemoEncounter{{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 150}},
+			Reactions:  []DemoReaction{{AttackerSteamID64: steamID, VictimSteamID64: 2, ReactionTimeMS: 100}},
+			Evidence:   []DemoEvidence{{SteamID64: steamID, VictimID: 2, Kind: "test", Value: 1, Details: "{}"}},
+		}
+		if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`UPDATE demos SET enabled=0 WHERE checksum='d2'`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	report, err := buildPlayerStatsReport(ctx, PlayerStatsReportOptions{DatabasePath: dbPath, Config: DefaultSuspicionConfig()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Players) != 1 || report.Players[0].Shots != 50 || report.Players[0].DemoCount != 1 {
+		t.Fatalf("expected stats from one demo only, got %+v", report.Players)
+	}
+	if report.Players[0].TTDSamples != 1 || report.Players[0].ReactionSamples != 1 {
+		t.Fatalf("expected 1 ttd/reaction sample, got %+v", report.Players[0])
+	}
+	if len(report.Weapons) != 1 || report.Weapons[0].Shots != 50 {
+		t.Fatalf("bad weapons: %+v", report.Weapons)
+	}
+	if len(report.Evidence) != 1 {
+		t.Fatalf("evidence = %d, want 1", len(report.Evidence))
+	}
+	if len(report.Demos) != 2 {
+		t.Fatalf("demo list = %d, want 2 (disabled demos stay listed)", len(report.Demos))
+	}
+	for _, d := range report.Demos {
+		wantEnabled := d.Checksum == "d1"
+		if d.Enabled != wantEnabled {
+			t.Fatalf("demo %s enabled=%v", d.Checksum, d.Enabled)
+		}
+		if d.FileName == "" || d.ImportedAt == "" || d.Players != 1 || d.Rounds != 10 {
+			t.Fatalf("bad demo metadata: %+v", d)
+		}
+	}
+}
+
+func TestSetDemoEnabled(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "stats.db")
+	db, err := openPlayerStatsDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	match := &Match{Checksum: "t1", DemoFilePath: "a.dem", DemoFileName: "a", Date: time.Now(), Source: constants.DemoSourceValve}
+	stats := DemoStats{Players: map[uint64]*DemoPlayerStats{1: {SteamID64: 1, Name: "one"}}, Weapons: map[uint64]map[string]*DemoWeaponStats{}}
+	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	if err := SetDemoEnabled(ctx, dbPath, "t1", false); err != nil {
+		t.Fatal(err)
+	}
+	report, err := buildPlayerStatsReport(ctx, PlayerStatsReportOptions{DatabasePath: dbPath, Config: DefaultSuspicionConfig()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Demos) != 1 || report.Demos[0].Enabled {
+		t.Fatalf("demo should be disabled: %+v", report.Demos)
+	}
+	if err := SetDemoEnabled(ctx, dbPath, "missing", true); !errors.Is(err, ErrDemoNotFound) {
+		t.Fatalf("err = %v, want ErrDemoNotFound", err)
+	}
+}
+
+func TestExportImportRoundtrip(t *testing.T) {
+	ctx := context.Background()
+	sourcePath := filepath.Join(t.TempDir(), "source.db")
+	db, err := openPlayerStatsDB(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steamID := uint64(76561198000000001)
+	match := &Match{Checksum: "x1", DemoFilePath: "x.dem", DemoFileName: "x", MapName: "de_test", Date: time.Unix(100, 0), TickRate: 64, BuildNumber: 2, Source: constants.DemoSourceValve}
+	stats := DemoStats{
+		Players:    map[uint64]*DemoPlayerStats{steamID: {SteamID64: steamID, Name: "Alice", Rounds: 10, Shots: 50, HitShots: 25, DamageEvents: 20, HeadHitEvents: 5}},
+		Weapons:    map[uint64]map[string]*DemoWeaponStats{steamID: {"AK-47": {SteamID64: steamID, WeaponName: "AK-47", Shots: 50, HitShots: 25}}},
+		Encounters: []DemoEncounter{{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 150, ConfirmedAngle: 3, WeaponName: "AK-47", Snap: true}},
+		Reactions:  []DemoReaction{{AttackerSteamID64: steamID, VictimSteamID64: 2, ReactionTimeMS: 100, WeaponName: "AK-47"}},
+		Evidence:   []DemoEvidence{{SteamID64: steamID, VictimID: 2, Kind: "test", Value: 1, Details: "{}"}},
+	}
+	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+		t.Fatal(err)
+	}
+	// disabled demos are excluded from exports
+	match2 := &Match{Checksum: "x2", DemoFilePath: "y.dem", DemoFileName: "y", Date: time.Unix(200, 0), Source: constants.DemoSourceValve}
+	if err := storeAnalyzedDemo(ctx, db, match2, DemoStats{Players: map[uint64]*DemoPlayerStats{}, Weapons: map[uint64]map[string]*DemoWeaponStats{}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE demos SET enabled=0 WHERE checksum='x2'`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	export, err := ExportPlayerStatsData(ctx, sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if export.Format != PlayerStatsExportFormat || export.Version != PlayerStatsExportVersion {
+		t.Fatalf("bad envelope: %+v", export)
+	}
+	if len(export.Demos) != 1 || export.Demos[0].Checksum != "x1" {
+		t.Fatalf("expected only enabled demo, got %+v", export.Demos)
+	}
+
+	targetPath := filepath.Join(t.TempDir(), "target.db")
+	result, err := ImportPlayerStatsData(ctx, targetPath, export)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Imported != 1 || result.Skipped != 0 {
+		t.Fatalf("result = %+v, want 1/0", result)
+	}
+	// re-import dedupes by checksum
+	result, err = ImportPlayerStatsData(ctx, targetPath, export)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Imported != 0 || result.Skipped != 1 {
+		t.Fatalf("result = %+v, want 0/1", result)
+	}
+
+	original, err := buildPlayerStatsReport(ctx, PlayerStatsReportOptions{DatabasePath: sourcePath, Config: DefaultSuspicionConfig()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	imported, err := buildPlayerStatsReport(ctx, PlayerStatsReportOptions{DatabasePath: targetPath, Config: DefaultSuspicionConfig()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imported.Players) != 1 {
+		t.Fatalf("players = %d, want 1", len(imported.Players))
+	}
+	a, b := original.Players[0], imported.Players[0]
+	if a.Shots != b.Shots || a.TTDSamples != b.TTDSamples || a.ReactionSamples != b.ReactionSamples || a.Name != b.Name || a.SnapEvents != b.SnapEvents {
+		t.Fatalf("roundtrip mismatch:\noriginal %+v\nimported %+v", a, b)
+	}
+	if len(imported.Weapons) != 1 || imported.Weapons[0].Shots != 50 {
+		t.Fatalf("weapons mismatch: %+v", imported.Weapons)
+	}
+	if len(imported.Evidence) != 1 {
+		t.Fatalf("evidence = %d, want 1", len(imported.Evidence))
+	}
+}
+
+func TestImportRejectsBadEnvelope(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "stats.db")
+	if _, err := ImportPlayerStatsData(ctx, dbPath, &PlayerStatsExport{Format: "wrong", Version: 1}); err == nil {
+		t.Fatal("expected format error")
+	}
+	if _, err := ImportPlayerStatsData(ctx, dbPath, &PlayerStatsExport{Format: PlayerStatsExportFormat, Version: 99}); err == nil {
+		t.Fatal("expected version error")
+	}
+	if _, err := ImportPlayerStatsData(ctx, dbPath, &PlayerStatsExport{Format: PlayerStatsExportFormat, Version: 1, Demos: []ExportedDemo{{}}}); err == nil {
+		t.Fatal("expected checksum error")
 	}
 }

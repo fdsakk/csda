@@ -122,7 +122,8 @@ CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, appli
 CREATE TABLE IF NOT EXISTS demos (
   id INTEGER PRIMARY KEY, checksum TEXT NOT NULL UNIQUE, path TEXT NOT NULL, file_name TEXT NOT NULL,
   map_name TEXT NOT NULL, demo_date TEXT NOT NULL, tick_rate REAL NOT NULL, build_number INTEGER NOT NULL,
-  source TEXT NOT NULL, analysis_version INTEGER NOT NULL, imported_at TEXT NOT NULL
+  source TEXT NOT NULL, analysis_version INTEGER NOT NULL, imported_at TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS players (
   steam_id INTEGER PRIMARY KEY, latest_name TEXT NOT NULL, names TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -189,7 +190,16 @@ INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, CURRENT_
 			}
 		}
 	}
-	_, err = db.Exec(`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, CURRENT_TIMESTAMP)`)
+	enabledExists, err := sqliteColumnExists(db, "demos", "enabled")
+	if err != nil {
+		return err
+	}
+	if !enabledExists {
+		if _, err = db.Exec(`ALTER TABLE demos ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1`); err != nil {
+			return err
+		}
+	}
+	_, err = db.Exec(`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, CURRENT_TIMESTAMP), (3, CURRENT_TIMESTAMP)`)
 	return err
 }
 
