@@ -17,3 +17,4 @@ node_modules
 *.dem
 /sample-demos/
 /sample-analysis/
+docs/
