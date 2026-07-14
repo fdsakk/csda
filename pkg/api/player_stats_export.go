@@ -14,7 +14,9 @@ const (
 	// PlayerStatsExportFormat identifies player stats export payloads.
 	PlayerStatsExportFormat = "cs-demo-analyzer/player-stats"
 	// PlayerStatsExportVersion is the current export payload version.
-	PlayerStatsExportVersion = 1
+	// Version 2 added reactionTimeMs to encounters; version 1 payloads are
+	// still importable with that field defaulting to -1.
+	PlayerStatsExportVersion = 2
 )
 
 type ExportedPlayer struct {
@@ -31,6 +33,7 @@ type ExportedPlayerDemoStats struct {
 	DamageEvents          int     `json:"damageEvents"`
 	HeadHitEvents         int     `json:"headHitEvents"`
 	Kills                 int     `json:"kills"`
+	Deaths                int     `json:"deaths"`
 	HeadshotKills         int     `json:"headshotKills"`
 	SmokeKills            int     `json:"smokeKills"`
 	WallKills             int     `json:"wallKills"`
@@ -60,6 +63,7 @@ type ExportedEncounter struct {
 	TTDMS            float64 `json:"ttdMs"`
 	TTDConfirmedMS   float64 `json:"ttdConfirmedMs"`
 	FirstShotTimeMS  float64 `json:"firstShotTimeMs"`
+	ReactionTimeMS   float64 `json:"reactionTimeMs"`
 	FirstAngle       float64 `json:"firstAngle"`
 	ConfirmedAngle   float64 `json:"confirmedAngle"`
 	FirstShotAngle   float64 `json:"firstShotAngle"`
@@ -164,7 +168,7 @@ func ExportPlayerStatsData(ctx context.Context, databasePath string) (*PlayerSta
 		return nil, err
 	}
 
-	statRows, err := db.QueryContext(ctx, `SELECT demo_id,steam_id,rounds,shots,hit_shots,damage_events,head_hit_events,kills,headshot_kills,smoke_kills,wall_kills,unspotted_damage_events,first_bullet_encounters,first_bullet_head_hits,snap_events,ttd_samples,ttd_sum_ms,moving_shots,moving_hit_shots,airborne_shots,airborne_hit_shots,flashed_shots,flashed_hit_shots,scoped_shots,scoped_hit_shots FROM player_demo_stats ORDER BY demo_id,steam_id`)
+	statRows, err := db.QueryContext(ctx, `SELECT demo_id,steam_id,rounds,shots,hit_shots,damage_events,head_hit_events,kills,deaths,headshot_kills,smoke_kills,wall_kills,unspotted_damage_events,first_bullet_encounters,first_bullet_head_hits,snap_events,ttd_samples,ttd_sum_ms,moving_shots,moving_hit_shots,airborne_shots,airborne_hit_shots,flashed_shots,flashed_hit_shots,scoped_shots,scoped_hit_shots FROM player_demo_stats ORDER BY demo_id,steam_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +176,7 @@ func ExportPlayerStatsData(ctx context.Context, databasePath string) (*PlayerSta
 		var demoID int64
 		var steamID uint64
 		var s ExportedPlayerDemoStats
-		if err := statRows.Scan(&demoID, &steamID, &s.Rounds, &s.Shots, &s.HitShots, &s.DamageEvents, &s.HeadHitEvents, &s.Kills, &s.HeadshotKills, &s.SmokeKills, &s.WallKills, &s.UnspottedDamageEvents, &s.FirstBulletEncounters, &s.FirstBulletHeadHits, &s.SnapEvents, &s.TTDSamples, &s.TTDSumMS, &s.MovingShots, &s.MovingHitShots, &s.AirborneShots, &s.AirborneHitShots, &s.FlashedShots, &s.FlashedHitShots, &s.ScopedShots, &s.ScopedHitShots); err != nil {
+		if err := statRows.Scan(&demoID, &steamID, &s.Rounds, &s.Shots, &s.HitShots, &s.DamageEvents, &s.HeadHitEvents, &s.Kills, &s.Deaths, &s.HeadshotKills, &s.SmokeKills, &s.WallKills, &s.UnspottedDamageEvents, &s.FirstBulletEncounters, &s.FirstBulletHeadHits, &s.SnapEvents, &s.TTDSamples, &s.TTDSumMS, &s.MovingShots, &s.MovingHitShots, &s.AirborneShots, &s.AirborneHitShots, &s.FlashedShots, &s.FlashedHitShots, &s.ScopedShots, &s.ScopedHitShots); err != nil {
 			statRows.Close()
 			return nil, err
 		}
@@ -186,7 +190,7 @@ func ExportPlayerStatsData(ctx context.Context, databasePath string) (*PlayerSta
 		return nil, err
 	}
 
-	encounterRows, err := db.QueryContext(ctx, `SELECT demo_id,round_number,attacker_steam_id,victim_steam_id,first_spotted_tick,confirmed_tick,damage_tick,ttd_ms,ttd_confirmed_ms,first_shot_time_ms,first_angle,confirmed_angle,first_shot_angle,distance_meters,weapon_name,snap FROM encounters ORDER BY id`)
+	encounterRows, err := db.QueryContext(ctx, `SELECT demo_id,round_number,attacker_steam_id,victim_steam_id,first_spotted_tick,confirmed_tick,damage_tick,ttd_ms,ttd_confirmed_ms,first_shot_time_ms,reaction_time_ms,first_angle,confirmed_angle,first_shot_angle,distance_meters,weapon_name,snap FROM encounters ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +198,7 @@ func ExportPlayerStatsData(ctx context.Context, databasePath string) (*PlayerSta
 		var demoID int64
 		var attacker, victim uint64
 		var e ExportedEncounter
-		if err := encounterRows.Scan(&demoID, &e.RoundNumber, &attacker, &victim, &e.FirstSpottedTick, &e.ConfirmedTick, &e.DamageTick, &e.TTDMS, &e.TTDConfirmedMS, &e.FirstShotTimeMS, &e.FirstAngle, &e.ConfirmedAngle, &e.FirstShotAngle, &e.DistanceMeters, &e.WeaponName, &e.Snap); err != nil {
+		if err := encounterRows.Scan(&demoID, &e.RoundNumber, &attacker, &victim, &e.FirstSpottedTick, &e.ConfirmedTick, &e.DamageTick, &e.TTDMS, &e.TTDConfirmedMS, &e.FirstShotTimeMS, &e.ReactionTimeMS, &e.FirstAngle, &e.ConfirmedAngle, &e.FirstShotAngle, &e.DistanceMeters, &e.WeaponName, &e.Snap); err != nil {
 			encounterRows.Close()
 			return nil, err
 		}
@@ -324,7 +328,7 @@ func ImportPlayerStatsData(ctx context.Context, databasePath string, payload *Pl
 	if payload == nil || payload.Format != PlayerStatsExportFormat {
 		return nil, fmt.Errorf("unsupported export format, expected %q", PlayerStatsExportFormat)
 	}
-	if payload.Version != PlayerStatsExportVersion {
+	if payload.Version != 1 && payload.Version != PlayerStatsExportVersion {
 		return nil, fmt.Errorf("unsupported export version %d, expected %d", payload.Version, PlayerStatsExportVersion)
 	}
 	for _, demo := range payload.Demos {
@@ -415,8 +419,8 @@ func ImportPlayerStatsData(ctx context.Context, databasePath string, payload *Pl
 			if err := upsertPlayer(steamID); err != nil {
 				return nil, err
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO player_demo_stats(demo_id,steam_id,rounds,shots,hit_shots,damage_events,head_hit_events,kills,headshot_kills,smoke_kills,wall_kills,unspotted_damage_events,first_bullet_encounters,first_bullet_head_hits,snap_events,ttd_samples,ttd_sum_ms,moving_shots,moving_hit_shots,airborne_shots,airborne_hit_shots,flashed_shots,flashed_hit_shots,scoped_shots,scoped_hit_shots) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-				demoID, steamID, s.Rounds, s.Shots, s.HitShots, s.DamageEvents, s.HeadHitEvents, s.Kills, s.HeadshotKills, s.SmokeKills, s.WallKills, s.UnspottedDamageEvents, s.FirstBulletEncounters, s.FirstBulletHeadHits, s.SnapEvents, s.TTDSamples, s.TTDSumMS, s.MovingShots, s.MovingHitShots, s.AirborneShots, s.AirborneHitShots, s.FlashedShots, s.FlashedHitShots, s.ScopedShots, s.ScopedHitShots)
+			_, err = tx.ExecContext(ctx, `INSERT INTO player_demo_stats(demo_id,steam_id,rounds,shots,hit_shots,damage_events,head_hit_events,kills,deaths,headshot_kills,smoke_kills,wall_kills,unspotted_damage_events,first_bullet_encounters,first_bullet_head_hits,snap_events,ttd_samples,ttd_sum_ms,moving_shots,moving_hit_shots,airborne_shots,airborne_hit_shots,flashed_shots,flashed_hit_shots,scoped_shots,scoped_hit_shots) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+				demoID, steamID, s.Rounds, s.Shots, s.HitShots, s.DamageEvents, s.HeadHitEvents, s.Kills, s.Deaths, s.HeadshotKills, s.SmokeKills, s.WallKills, s.UnspottedDamageEvents, s.FirstBulletEncounters, s.FirstBulletHeadHits, s.SnapEvents, s.TTDSamples, s.TTDSumMS, s.MovingShots, s.MovingHitShots, s.AirborneShots, s.AirborneHitShots, s.FlashedShots, s.FlashedHitShots, s.ScopedShots, s.ScopedHitShots)
 			if err != nil {
 				return nil, err
 			}
@@ -430,8 +434,13 @@ func ImportPlayerStatsData(ctx context.Context, databasePath string, payload *Pl
 			if err != nil {
 				return nil, err
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO encounters(demo_id,round_number,attacker_steam_id,victim_steam_id,first_spotted_tick,confirmed_tick,damage_tick,ttd_ms,ttd_confirmed_ms,first_shot_time_ms,first_angle,confirmed_angle,first_shot_angle,distance_meters,weapon_name,snap) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-				demoID, e.RoundNumber, attacker, victim, e.FirstSpottedTick, e.ConfirmedTick, e.DamageTick, e.TTDMS, e.TTDConfirmedMS, e.FirstShotTimeMS, e.FirstAngle, e.ConfirmedAngle, e.FirstShotAngle, e.DistanceMeters, e.WeaponName, e.Snap)
+			reactionTimeMS := e.ReactionTimeMS
+			if payload.Version == 1 {
+				// version 1 payloads predate the field; -1 excludes them from reports
+				reactionTimeMS = -1
+			}
+			_, err = tx.ExecContext(ctx, `INSERT INTO encounters(demo_id,round_number,attacker_steam_id,victim_steam_id,first_spotted_tick,confirmed_tick,damage_tick,ttd_ms,ttd_confirmed_ms,first_shot_time_ms,reaction_time_ms,first_angle,confirmed_angle,first_shot_angle,distance_meters,weapon_name,snap) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+				demoID, e.RoundNumber, attacker, victim, e.FirstSpottedTick, e.ConfirmedTick, e.DamageTick, e.TTDMS, e.TTDConfirmedMS, e.FirstShotTimeMS, reactionTimeMS, e.FirstAngle, e.ConfirmedAngle, e.FirstShotAngle, e.DistanceMeters, e.WeaponName, e.Snap)
 			if err != nil {
 				return nil, err
 			}

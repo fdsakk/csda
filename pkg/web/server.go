@@ -13,6 +13,7 @@ import (
 	urlpath "path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -93,6 +94,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/jobs", s.handleJobs)
 	s.mux.HandleFunc("POST /api/uploads", s.handleUpload)
 	s.mux.HandleFunc("PATCH /api/demos/{checksum}", s.handleDemoToggle)
+	s.mux.HandleFunc("PATCH /api/players/{steamId}", s.handlePlayerSaved)
 	s.mux.HandleFunc("GET /api/export", s.handleExport)
 	s.mux.HandleFunc("POST /api/import", s.handleImport)
 	s.mux.HandleFunc("/", s.handleStatic)
@@ -244,6 +246,31 @@ func (s *Server) handleDemoToggle(w http.ResponseWriter, r *http.Request) {
 	err := api.SetDemoEnabled(r.Context(), s.options.DatabasePath, r.PathValue("checksum"), *body.Enabled)
 	if errors.Is(err, api.ErrDemoNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "demo not found"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handlePlayerSaved(w http.ResponseWriter, r *http.Request) {
+	steamID, err := strconv.ParseUint(r.PathValue("steamId"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid steam id"})
+		return
+	}
+	var body struct {
+		Saved *bool `json:"saved"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Saved == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `expected JSON body with "saved" boolean`})
+		return
+	}
+	err = api.SetPlayerSaved(r.Context(), s.options.DatabasePath, steamID, *body.Saved)
+	if errors.Is(err, api.ErrPlayerNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "player not found"})
 		return
 	}
 	if err != nil {

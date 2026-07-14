@@ -65,6 +65,7 @@ type DemoEncounter struct {
 	TTDMS             float64 `json:"ttdMs"`
 	TTDConfirmedMS    float64 `json:"ttdConfirmedMs"`
 	FirstShotTimeMS   float64 `json:"firstShotTimeMs"`
+	ReactionTimeMS    float64 `json:"reactionTimeMs"`
 	FirstAngle        float64 `json:"firstAngle"`
 	ConfirmedAngle    float64 `json:"confirmedAngle"`
 	FirstShotAngle    float64 `json:"firstShotAngle"`
@@ -106,6 +107,7 @@ type DemoPlayerStats struct {
 	DamageEvents          int     `json:"damageEvents"`
 	HeadHitEvents         int     `json:"headHitEvents"`
 	Kills                 int     `json:"kills"`
+	Deaths                int     `json:"deaths"`
 	HeadshotKills         int     `json:"headshotKills"`
 	SmokeKills            int     `json:"smokeKills"`
 	WallKills             int     `json:"wallKills"`
@@ -488,8 +490,14 @@ func (c *demoStatsCollector) onDamage(analyzer *Analyzer, damage *Damage) {
 		return
 	}
 	firstShotMS := float64(-1)
+	// Fall back to the damage tick when no shot was attributed to this
+	// encounter (player_hurt can arrive before weapon_fire in the same tick,
+	// or the shot was attributed to another encounter); a hitscan hit implies
+	// a shot at the damage tick, keeping reaction <= TTD per encounter.
+	reactionMS := ttd
 	if encounter.firstShotTick >= 0 {
 		firstShotMS = c.tickDeltaMS(analyzer, encounter.confirmedTick, encounter.firstShotTick)
+		reactionMS = c.tickDeltaMS(analyzer, encounter.firstTick, encounter.firstShotTick)
 		if encounter.shotCount == 1 && damage.Tick-encounter.firstShotTick <= 2 && damage.HitGroup == events.HitGroupHead {
 			stats.FirstBulletHeadHits++
 		}
@@ -499,7 +507,7 @@ func (c *demoStatsCollector) onDamage(analyzer *Analyzer, damage *Damage) {
 	c.result.Encounters = append(c.result.Encounters, DemoEncounter{
 		RoundNumber: damage.RoundNumber, AttackerSteamID64: damage.AttackerSteamID64, VictimSteamID64: damage.VictimSteamID64,
 		FirstSpottedTick: encounter.firstTick, ConfirmedTick: encounter.confirmedTick, DamageTick: damage.Tick,
-		TTDMS: ttd, TTDConfirmedMS: ttdConfirmed, FirstShotTimeMS: firstShotMS,
+		TTDMS: ttd, TTDConfirmedMS: ttdConfirmed, FirstShotTimeMS: firstShotMS, ReactionTimeMS: reactionMS,
 		FirstAngle: encounter.firstAngle, ConfirmedAngle: encounter.confirmedAngle, FirstShotAngle: encounter.firstShotAngle,
 		DistanceMeters: encounter.distance, WeaponName: damage.WeaponName.String(), Snap: encounter.snap,
 	})
@@ -517,6 +525,7 @@ func (c *demoStatsCollector) finalize(match *Match) {
 		stats := c.player(player.SteamID64, player.Name)
 		stats.Rounds = rounds
 		stats.Kills = player.KillCount()
+		stats.Deaths = player.DeathCount()
 		stats.HeadshotKills = player.HeadshotCount()
 	}
 	for _, kill := range match.Kills {

@@ -126,13 +126,15 @@ CREATE TABLE IF NOT EXISTS demos (
   enabled INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS players (
-  steam_id INTEGER PRIMARY KEY, latest_name TEXT NOT NULL, names TEXT NOT NULL, updated_at TEXT NOT NULL
+  steam_id INTEGER PRIMARY KEY, latest_name TEXT NOT NULL, names TEXT NOT NULL, updated_at TEXT NOT NULL,
+  saved INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS player_demo_stats (
   demo_id INTEGER NOT NULL REFERENCES demos(id) ON DELETE CASCADE,
   steam_id INTEGER NOT NULL REFERENCES players(steam_id) ON DELETE CASCADE,
   rounds INTEGER NOT NULL, shots INTEGER NOT NULL, hit_shots INTEGER NOT NULL,
   damage_events INTEGER NOT NULL, head_hit_events INTEGER NOT NULL, kills INTEGER NOT NULL,
+  deaths INTEGER NOT NULL DEFAULT 0,
   headshot_kills INTEGER NOT NULL, smoke_kills INTEGER NOT NULL, wall_kills INTEGER NOT NULL,
   unspotted_damage_events INTEGER NOT NULL, first_bullet_encounters INTEGER NOT NULL,
   first_bullet_head_hits INTEGER NOT NULL, snap_events INTEGER NOT NULL,
@@ -148,6 +150,7 @@ CREATE TABLE IF NOT EXISTS encounters (
   round_number INTEGER NOT NULL, attacker_steam_id INTEGER NOT NULL, victim_steam_id INTEGER NOT NULL,
   first_spotted_tick INTEGER NOT NULL, confirmed_tick INTEGER NOT NULL, damage_tick INTEGER NOT NULL,
   ttd_ms REAL NOT NULL, ttd_confirmed_ms REAL NOT NULL, first_shot_time_ms REAL NOT NULL,
+  reaction_time_ms REAL NOT NULL DEFAULT -1,
   first_angle REAL NOT NULL, confirmed_angle REAL NOT NULL, first_shot_angle REAL NOT NULL,
   distance_meters REAL NOT NULL, weapon_name TEXT NOT NULL, snap INTEGER NOT NULL
 );
@@ -199,7 +202,32 @@ INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, CURRENT_
 			return err
 		}
 	}
-	_, err = db.Exec(`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, CURRENT_TIMESTAMP), (3, CURRENT_TIMESTAMP)`)
+	reactionExists, err := sqliteColumnExists(db, "encounters", "reaction_time_ms")
+	if err != nil {
+		return err
+	}
+	if !reactionExists {
+		// -1 marks rows analyzed before the column existed; the report skips them.
+		if _, err = db.Exec(`ALTER TABLE encounters ADD COLUMN reaction_time_ms REAL NOT NULL DEFAULT -1`); err != nil {
+			return err
+		}
+	}
+	addedColumns := [][3]string{
+		{"player_demo_stats", "deaths", `INTEGER NOT NULL DEFAULT 0`},
+		{"players", "saved", `INTEGER NOT NULL DEFAULT 0`},
+	}
+	for _, column := range addedColumns {
+		exists, checkErr := sqliteColumnExists(db, column[0], column[1])
+		if checkErr != nil {
+			return checkErr
+		}
+		if !exists {
+			if _, err = db.Exec(`ALTER TABLE ` + column[0] + ` ADD COLUMN ` + column[1] + ` ` + column[2]); err != nil {
+				return err
+			}
+		}
+	}
+	_, err = db.Exec(`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, CURRENT_TIMESTAMP), (3, CURRENT_TIMESTAMP), (4, CURRENT_TIMESTAMP), (5, CURRENT_TIMESTAMP)`)
 	return err
 }
 
@@ -421,15 +449,15 @@ func storeAnalyzedDemo(ctx context.Context, db *sql.DB, match *Match, stats Demo
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO player_demo_stats(demo_id,steam_id,rounds,shots,hit_shots,damage_events,head_hit_events,kills,headshot_kills,smoke_kills,wall_kills,unspotted_damage_events,first_bullet_encounters,first_bullet_head_hits,snap_events,ttd_samples,ttd_sum_ms,moving_shots,moving_hit_shots,airborne_shots,airborne_hit_shots,flashed_shots,flashed_hit_shots,scoped_shots,scoped_hit_shots) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			demoID, id, p.Rounds, p.Shots, p.HitShots, p.DamageEvents, p.HeadHitEvents, p.Kills, p.HeadshotKills, p.SmokeKills, p.WallKills, p.UnspottedDamageEvents, p.FirstBulletEncounters, p.FirstBulletHeadHits, p.SnapEvents, p.TTDSamples, p.TTDSumMS, p.MovingShots, p.MovingHitShots, p.AirborneShots, p.AirborneHitShots, p.FlashedShots, p.FlashedHitShots, p.ScopedShots, p.ScopedHitShots)
+		_, err = tx.ExecContext(ctx, `INSERT INTO player_demo_stats(demo_id,steam_id,rounds,shots,hit_shots,damage_events,head_hit_events,kills,deaths,headshot_kills,smoke_kills,wall_kills,unspotted_damage_events,first_bullet_encounters,first_bullet_head_hits,snap_events,ttd_samples,ttd_sum_ms,moving_shots,moving_hit_shots,airborne_shots,airborne_hit_shots,flashed_shots,flashed_hit_shots,scoped_shots,scoped_hit_shots) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			demoID, id, p.Rounds, p.Shots, p.HitShots, p.DamageEvents, p.HeadHitEvents, p.Kills, p.Deaths, p.HeadshotKills, p.SmokeKills, p.WallKills, p.UnspottedDamageEvents, p.FirstBulletEncounters, p.FirstBulletHeadHits, p.SnapEvents, p.TTDSamples, p.TTDSumMS, p.MovingShots, p.MovingHitShots, p.AirborneShots, p.AirborneHitShots, p.FlashedShots, p.FlashedHitShots, p.ScopedShots, p.ScopedHitShots)
 		if err != nil {
 			return err
 		}
 	}
 	for _, e := range stats.Encounters {
-		_, err = tx.ExecContext(ctx, `INSERT INTO encounters(demo_id,round_number,attacker_steam_id,victim_steam_id,first_spotted_tick,confirmed_tick,damage_tick,ttd_ms,ttd_confirmed_ms,first_shot_time_ms,first_angle,confirmed_angle,first_shot_angle,distance_meters,weapon_name,snap) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			demoID, e.RoundNumber, e.AttackerSteamID64, e.VictimSteamID64, e.FirstSpottedTick, e.ConfirmedTick, e.DamageTick, e.TTDMS, e.TTDConfirmedMS, e.FirstShotTimeMS, e.FirstAngle, e.ConfirmedAngle, e.FirstShotAngle, e.DistanceMeters, e.WeaponName, e.Snap)
+		_, err = tx.ExecContext(ctx, `INSERT INTO encounters(demo_id,round_number,attacker_steam_id,victim_steam_id,first_spotted_tick,confirmed_tick,damage_tick,ttd_ms,ttd_confirmed_ms,first_shot_time_ms,reaction_time_ms,first_angle,confirmed_angle,first_shot_angle,distance_meters,weapon_name,snap) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			demoID, e.RoundNumber, e.AttackerSteamID64, e.VictimSteamID64, e.FirstSpottedTick, e.ConfirmedTick, e.DamageTick, e.TTDMS, e.TTDConfirmedMS, e.FirstShotTimeMS, e.ReactionTimeMS, e.FirstAngle, e.ConfirmedAngle, e.FirstShotAngle, e.DistanceMeters, e.WeaponName, e.Snap)
 		if err != nil {
 			return err
 		}

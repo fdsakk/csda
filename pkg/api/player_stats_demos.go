@@ -8,6 +8,9 @@ import (
 // ErrDemoNotFound is returned when a demo checksum does not exist in the database.
 var ErrDemoNotFound = errors.New("demo not found")
 
+// ErrPlayerNotFound is returned when a steam id does not exist in the database.
+var ErrPlayerNotFound = errors.New("player not found")
+
 // SetDemoEnabled includes or excludes a demo from the player stats report.
 func SetDemoEnabled(ctx context.Context, databasePath, checksum string, enabled bool) error {
 	db, err := openPlayerStatsDB(databasePath)
@@ -25,6 +28,27 @@ func SetDemoEnabled(ctx context.Context, databasePath, checksum string, enabled 
 	}
 	if affected == 0 {
 		return ErrDemoNotFound
+	}
+	return nil
+}
+
+// SetPlayerSaved marks or unmarks a player as manually tracked.
+func SetPlayerSaved(ctx context.Context, databasePath string, steamID uint64, saved bool) error {
+	db, err := openPlayerStatsDB(databasePath)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	result, err := db.ExecContext(ctx, `UPDATE players SET saved=? WHERE steam_id=?`, saved, steamID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrPlayerNotFound
 	}
 	return nil
 }

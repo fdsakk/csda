@@ -13,6 +13,7 @@ export type Player = {
   headHitEvents: number;
   headHitRate: number;
   kills: number;
+  deaths: number;
   headshotKills: number;
   headshotKillRate: number;
   smokeKills: number;
@@ -30,6 +31,7 @@ export type Player = {
   reactionP10Ms: number;
   crosshairMedianAngle: number;
   firstShotMedianAngle: number;
+  saved: boolean;
   eligible: boolean;
   suspicionScore: number;
   status: 'normal' | 'watch' | 'review' | 'critical' | 'insufficient_sample';
@@ -91,6 +93,18 @@ export async function setDemoEnabled(checksum: string, enabled: boolean): Promis
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ enabled }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ error: undefined }));
+    throw new Error(body.error ?? `Request failed: ${response.status}`);
+  }
+}
+
+export async function setPlayerSaved(steamId: string, saved: boolean): Promise<void> {
+  const response = await fetch(`/api/players/${encodeURIComponent(steamId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ saved }),
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: undefined }));

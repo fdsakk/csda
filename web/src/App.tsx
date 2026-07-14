@@ -1,6 +1,6 @@
 import { DragEvent, Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FileUp, Film, Search, Upload, X } from 'lucide-react';
-import { Demo, getJobs, getReport, importStats, Job, Player, Report, setDemoEnabled, uploadDemos } from './api';
+import { ArrowDown, ArrowUp, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FileUp, Film, Search, Upload, X } from 'lucide-react';
+import { Demo, getJobs, getReport, importStats, Job, Player, Report, setDemoEnabled, setPlayerSaved, uploadDemos } from './api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
-type SortKey = 'suspicionScore' | 'name' | 'demoCount' | 'shots' | 'accuracy' | 'headHitRate' | 'headshotKillRate' | 'ttdWeightedMs' | 'reactionWeightedMs';
+type SortKey = 'suspicionScore' | 'name' | 'demoCount' | 'shots' | 'kills' | 'deaths' | 'accuracy' | 'headHitRate' | 'headshotKillRate' | 'ttdWeightedMs' | 'reactionWeightedMs';
 type StatusFilter = 'all' | 'flagged' | Player['status'];
 
 const EMPTY_REPORT: Report = { players: [], playersByWeapon: [], evidence: [], importedDemos: [] };
@@ -214,6 +214,8 @@ const COLUMNS: { key: SortKey | null; label: string }[] = [
   { key: 'name', label: 'Player' },
   { key: 'demoCount', label: 'Demos' },
   { key: 'shots', label: 'Shots' },
+  { key: 'kills', label: 'Kills' },
+  { key: 'deaths', label: 'Deaths' },
   { key: 'accuracy', label: 'Accuracy' },
   { key: 'headHitRate', label: 'Head hit' },
   { key: 'headshotKillRate', label: 'HS kills' },
@@ -222,7 +224,7 @@ const COLUMNS: { key: SortKey | null; label: string }[] = [
   { key: 'suspicionScore', label: 'Status' },
 ];
 
-function PlayerTable({ players }: { players: Player[] }) {
+function PlayerTable({ players, onToggleSaved }: { players: Player[]; onToggleSaved: (player: Player) => void }) {
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
   const [status, setStatus] = useState<StatusFilter>('all');
@@ -239,6 +241,8 @@ function PlayerTable({ players }: { players: Player[] }) {
       const matchesStatus = status === 'all' || (status === 'flagged' ? FLAGGED.includes(player.status) : player.status === status);
       return matchesText && matchesStatus;
     }).toSorted((a, b) => {
+      // saved players pin to the top only under the default (status) sort
+      if (sortKey === 'suspicionScore' && a.saved !== b.saved) return a.saved ? -1 : 1;
       const av = a[sortKey], bv = b[sortKey];
       const order = typeof av === 'string' ? av.localeCompare(String(bv)) : Number(av) - Number(bv);
       return ascending ? order : -order;
@@ -290,7 +294,7 @@ function PlayerTable({ players }: { players: Player[] }) {
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-border">
-        <Table className="min-w-[960px]">
+        <Table className="min-w-[1100px]">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               {COLUMNS.map((col) => (
@@ -324,13 +328,24 @@ function PlayerTable({ players }: { players: Player[] }) {
                     </TableCell>
                     <TableCell className="tabular-nums">{player.demoCount}</TableCell>
                     <TableCell className="tabular-nums">{number.format(player.shots)}</TableCell>
+                    <TableCell className="tabular-nums">{number.format(player.kills)}</TableCell>
+                    <TableCell className="tabular-nums">{number.format(player.deaths)}</TableCell>
                     <TableCell className="tabular-nums">{pct(player.accuracy)}</TableCell>
                     <TableCell className="tabular-nums">{pct(player.headHitRate)}</TableCell>
                     <TableCell className="tabular-nums">{pct(player.headshotKillRate)}</TableCell>
                     <TableCell className="tabular-nums">{ms(player.ttdWeightedMs, player.ttdSamples)}</TableCell>
                     <TableCell className="tabular-nums">{ms(player.reactionWeightedMs, player.reactionSamples)}</TableCell>
                     <TableCell>
-                      <Badge variant={statusVariant(player.status)}>{STATUS_LABEL[player.status]}</Badge>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          className={cn('text-muted-foreground hover:text-foreground', player.saved && 'text-primary hover:text-primary')}
+                          title={player.saved ? 'Unsave player' : 'Save player'}
+                          onClick={(event) => { event.stopPropagation(); onToggleSaved(player); }}
+                        >
+                          <Bookmark className={cn('size-4', player.saved && 'fill-current')} />
+                        </button>
+                        <Badge variant={statusVariant(player.status)}>{STATUS_LABEL[player.status]}</Badge>
+                      </div>
                     </TableCell>
                   </TableRow>
                   {open ? (
@@ -525,6 +540,16 @@ export default function App() {
     finally { setLoading(false); }
   }, []);
 
+  const toggleSaved = useCallback(async (player: Player) => {
+    // optimistic flip; reload on failure to restore server state
+    setReport((current) => ({
+      ...current,
+      players: (current.players ?? []).map((p) => (p.steamId === player.steamId ? { ...p, saved: !player.saved } : p)),
+    }));
+    try { await setPlayerSaved(player.steamId, !player.saved); }
+    catch { void loadAll(); }
+  }, [loadAll]);
+
   useEffect(() => { void loadAll(); }, [loadAll]);
   useEffect(() => {
     const timer = window.setInterval(async () => {
@@ -559,7 +584,7 @@ export default function App() {
       {loading ? (
         <div className="py-20 text-center text-sm text-muted-foreground">Loading…</div>
       ) : (
-        <PlayerTable players={players} />
+        <PlayerTable players={players} onToggleSaved={(player) => void toggleSaved(player)} />
       )}
     </div>
   );

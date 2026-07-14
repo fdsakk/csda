@@ -35,6 +35,7 @@ type PlayerStatsReportRow struct {
 	HeadHitEvents         int                   `json:"headHitEvents"`
 	HeadHitRate           float64               `json:"headHitRate"`
 	Kills                 int                   `json:"kills"`
+	Deaths                int                   `json:"deaths"`
 	HeadshotKills         int                   `json:"headshotKills"`
 	HeadshotKillRate      float64               `json:"headshotKillRate"`
 	SmokeKills            int                   `json:"smokeKills"`
@@ -66,6 +67,7 @@ type PlayerStatsReportRow struct {
 	FlashedHitRate        float64               `json:"flashedHitRate"`
 	ScopedShots           int                   `json:"scopedShots"`
 	ScopedHitRate         float64               `json:"scopedHitRate"`
+	Saved                 bool                  `json:"saved"`
 	Eligible              bool                  `json:"eligible"`
 	SuspicionScore        int                   `json:"suspicionScore"`
 	Status                string                `json:"status"`
@@ -251,7 +253,7 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 	}
 	report := &PlayerStatsReport{}
 
-	rows, err := db.QueryContext(ctx, `SELECT p.steam_id,p.latest_name,p.names,COUNT(s.demo_id),COALESCE(SUM(s.rounds),0),COALESCE(SUM(s.shots),0),COALESCE(SUM(s.hit_shots),0),COALESCE(SUM(s.damage_events),0),COALESCE(SUM(s.head_hit_events),0),COALESCE(SUM(s.kills),0),COALESCE(SUM(s.headshot_kills),0),COALESCE(SUM(s.smoke_kills),0),COALESCE(SUM(s.wall_kills),0),COALESCE(SUM(s.unspotted_damage_events),0),COALESCE(SUM(s.first_bullet_encounters),0),COALESCE(SUM(s.first_bullet_head_hits),0),COALESCE(SUM(s.snap_events),0),COALESCE(SUM(s.ttd_samples),0),COALESCE(SUM(s.ttd_sum_ms),0),COALESCE(SUM(s.moving_shots),0),COALESCE(SUM(s.moving_hit_shots),0),COALESCE(SUM(s.airborne_shots),0),COALESCE(SUM(s.airborne_hit_shots),0),COALESCE(SUM(s.flashed_shots),0),COALESCE(SUM(s.flashed_hit_shots),0),COALESCE(SUM(s.scoped_shots),0),COALESCE(SUM(s.scoped_hit_shots),0) FROM players p JOIN player_demo_stats s ON s.steam_id=p.steam_id JOIN demos d ON d.id=s.demo_id AND d.enabled=1 GROUP BY p.steam_id,p.latest_name,p.names ORDER BY p.steam_id`)
+	rows, err := db.QueryContext(ctx, `SELECT p.steam_id,p.latest_name,p.names,p.saved,COUNT(s.demo_id),COALESCE(SUM(s.rounds),0),COALESCE(SUM(s.shots),0),COALESCE(SUM(s.hit_shots),0),COALESCE(SUM(s.damage_events),0),COALESCE(SUM(s.head_hit_events),0),COALESCE(SUM(s.kills),0),COALESCE(SUM(s.deaths),0),COALESCE(SUM(s.headshot_kills),0),COALESCE(SUM(s.smoke_kills),0),COALESCE(SUM(s.wall_kills),0),COALESCE(SUM(s.unspotted_damage_events),0),COALESCE(SUM(s.first_bullet_encounters),0),COALESCE(SUM(s.first_bullet_head_hits),0),COALESCE(SUM(s.snap_events),0),COALESCE(SUM(s.ttd_samples),0),COALESCE(SUM(s.ttd_sum_ms),0),COALESCE(SUM(s.moving_shots),0),COALESCE(SUM(s.moving_hit_shots),0),COALESCE(SUM(s.airborne_shots),0),COALESCE(SUM(s.airborne_hit_shots),0),COALESCE(SUM(s.flashed_shots),0),COALESCE(SUM(s.flashed_hit_shots),0),COALESCE(SUM(s.scoped_shots),0),COALESCE(SUM(s.scoped_hit_shots),0) FROM players p JOIN player_demo_stats s ON s.steam_id=p.steam_id JOIN demos d ON d.id=s.demo_id AND d.enabled=1 GROUP BY p.steam_id,p.latest_name,p.names,p.saved ORDER BY p.steam_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +263,7 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 		var storedTTDSamples int
 		var storedTTDSum float64
 		var movingHits, airborneHits, flashedHits, scopedHits int
-		if err := rows.Scan(&row.SteamID64, &row.Name, &names, &row.DemoCount, &row.Rounds, &row.Shots, &row.HitShots, &row.DamageEvents, &row.HeadHitEvents, &row.Kills, &row.HeadshotKills, &row.SmokeKills, &row.WallKills, &row.UnspottedDamageEvents, &row.FirstBulletEncounters, &row.FirstBulletHeadHits, &row.SnapEvents, &storedTTDSamples, &storedTTDSum, &row.MovingShots, &movingHits, &row.AirborneShots, &airborneHits, &row.FlashedShots, &flashedHits, &row.ScopedShots, &scopedHits); err != nil {
+		if err := rows.Scan(&row.SteamID64, &row.Name, &names, &row.Saved, &row.DemoCount, &row.Rounds, &row.Shots, &row.HitShots, &row.DamageEvents, &row.HeadHitEvents, &row.Kills, &row.Deaths, &row.HeadshotKills, &row.SmokeKills, &row.WallKills, &row.UnspottedDamageEvents, &row.FirstBulletEncounters, &row.FirstBulletHeadHits, &row.SnapEvents, &storedTTDSamples, &storedTTDSum, &row.MovingShots, &movingHits, &row.AirborneShots, &airborneHits, &row.FlashedShots, &flashedHits, &row.ScopedShots, &scopedHits); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -283,36 +285,50 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 	}
 	for index := range report.Players {
 		row := &report.Players[index]
-		ttdRows, qerr := db.QueryContext(ctx, `SELECT e.demo_id,s.rounds,e.ttd_ms,e.confirmed_angle,e.first_shot_angle FROM encounters e JOIN player_demo_stats s ON s.demo_id=e.demo_id AND s.steam_id=e.attacker_steam_id JOIN demos d ON d.id=e.demo_id AND d.enabled=1 WHERE e.attacker_steam_id=? AND e.ttd_ms BETWEEN 0 AND 1000 ORDER BY e.ttd_ms`, row.SteamID64)
+		ttdRows, qerr := db.QueryContext(ctx, `SELECT e.demo_id,s.rounds,e.ttd_ms,e.reaction_time_ms,e.confirmed_angle,e.first_shot_angle FROM encounters e JOIN player_demo_stats s ON s.demo_id=e.demo_id AND s.steam_id=e.attacker_steam_id JOIN demos d ON d.id=e.demo_id AND d.enabled=1 WHERE e.attacker_steam_id=? ORDER BY e.ttd_ms`, row.SteamID64)
 		if qerr != nil {
 			return nil, qerr
 		}
 		var ttdSamples []float64
+		var reactionSamples []float64
 		var crosshairAngles, firstShotAngles []float64
 		ttdByDemo := make(map[int64]*demoSamples)
+		reactionByDemo := make(map[int64]*demoSamples)
 		under190 := 0
 		for ttdRows.Next() {
 			var demoID int64
 			var rounds int
-			var value float64
+			var value, reaction float64
 			var crosshairAngle, firstShotAngle float64
-			if err := ttdRows.Scan(&demoID, &rounds, &value, &crosshairAngle, &firstShotAngle); err != nil {
+			if err := ttdRows.Scan(&demoID, &rounds, &value, &reaction, &crosshairAngle, &firstShotAngle); err != nil {
 				ttdRows.Close()
 				return nil, err
 			}
-			ttdSamples = append(ttdSamples, value)
-			group := ttdByDemo[demoID]
-			if group == nil {
-				group = &demoSamples{rounds: rounds}
-				ttdByDemo[demoID] = group
+			if value >= 0 && value <= 1000 {
+				ttdSamples = append(ttdSamples, value)
+				group := ttdByDemo[demoID]
+				if group == nil {
+					group = &demoSamples{rounds: rounds}
+					ttdByDemo[demoID] = group
+				}
+				group.values = append(group.values, value)
+				crosshairAngles = append(crosshairAngles, crosshairAngle)
+				if firstShotAngle > 0 {
+					firstShotAngles = append(firstShotAngles, firstShotAngle)
+				}
+				if value <= 190 {
+					under190++
+				}
 			}
-			group.values = append(group.values, value)
-			crosshairAngles = append(crosshairAngles, crosshairAngle)
-			if firstShotAngle > 0 {
-				firstShotAngles = append(firstShotAngles, firstShotAngle)
-			}
-			if value <= 190 {
-				under190++
+			// reaction_time_ms is -1 on rows stored before the column existed
+			if reaction >= 0 && reaction <= 1000 {
+				reactionSamples = append(reactionSamples, reaction)
+				group := reactionByDemo[demoID]
+				if group == nil {
+					group = &demoSamples{rounds: rounds}
+					reactionByDemo[demoID] = group
+				}
+				group.values = append(group.values, reaction)
 			}
 		}
 		ttdRows.Close()
@@ -330,29 +346,6 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 		row.CrosshairMedianAngle = percentile(crosshairAngles, .5)
 		row.FirstShotMedianAngle = percentile(firstShotAngles, .5)
 
-		reactionRows, reactionErr := db.QueryContext(ctx, `SELECT r.demo_id,s.rounds,r.reaction_time_ms FROM reactions r JOIN player_demo_stats s ON s.demo_id=r.demo_id AND s.steam_id=r.attacker_steam_id JOIN demos d ON d.id=r.demo_id AND d.enabled=1 WHERE r.attacker_steam_id=? AND r.reaction_time_ms BETWEEN 0 AND 1000 ORDER BY r.reaction_time_ms`, row.SteamID64)
-		if reactionErr != nil {
-			return nil, reactionErr
-		}
-		var reactionSamples []float64
-		reactionByDemo := make(map[int64]*demoSamples)
-		for reactionRows.Next() {
-			var demoID int64
-			var rounds int
-			var value float64
-			if err := reactionRows.Scan(&demoID, &rounds, &value); err != nil {
-				reactionRows.Close()
-				return nil, err
-			}
-			reactionSamples = append(reactionSamples, value)
-			group := reactionByDemo[demoID]
-			if group == nil {
-				group = &demoSamples{rounds: rounds}
-				reactionByDemo[demoID] = group
-			}
-			group.values = append(group.values, value)
-		}
-		reactionRows.Close()
 		row.ReactionSamples = len(reactionSamples)
 		row.ReactionMedianMS = percentile(reactionSamples, .5)
 		row.ReactionWeightedMS = roundWeightedDemoMedian(reactionByDemo)

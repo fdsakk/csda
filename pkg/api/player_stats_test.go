@@ -73,14 +73,14 @@ func TestStoreAndAggregateMultipleDemosBySteamID(t *testing.T) {
 	for index, name := range []string{"Alice", "Alice2", "Alice"} {
 		match := &Match{Checksum: string(rune('a' + index)), DemoFilePath: "demo.dem", DemoFileName: "demo", MapName: "de_test", Date: time.Unix(int64(index), 0), TickRate: 64, BuildNumber: 1, Source: constants.DemoSourceValve}
 		stats := DemoStats{
-			Players: map[uint64]*DemoPlayerStats{steamID: {SteamID64: steamID, Name: name, Rounds: 12, Shots: 40, HitShots: 20, DamageEvents: 20, HeadHitEvents: 10, FirstBulletEncounters: 20, FirstBulletHeadHits: 5, TTDSamples: 20, TTDSumMS: 3000}},
+			Players: map[uint64]*DemoPlayerStats{steamID: {SteamID64: steamID, Name: name, Rounds: 12, Shots: 40, HitShots: 20, DamageEvents: 20, HeadHitEvents: 10, Kills: 15, Deaths: 9, FirstBulletEncounters: 20, FirstBulletHeadHits: 5, TTDSamples: 20, TTDSumMS: 3000}},
 			Weapons: map[uint64]map[string]*DemoWeaponStats{steamID: {"AK-47": {SteamID64: steamID, WeaponName: "AK-47", Shots: 40, HitShots: 20, DamageEvents: 20, HeadHitEvents: 10}}},
 		}
 		for n := 0; n < 20; n++ {
-			stats.Encounters = append(stats.Encounters, DemoEncounter{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 150, TTDConfirmedMS: 120, ConfirmedAngle: 3, FirstShotAngle: 1})
+			stats.Encounters = append(stats.Encounters, DemoEncounter{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 150, TTDConfirmedMS: 120, ReactionTimeMS: 100, ConfirmedAngle: 3, FirstShotAngle: 1})
 			stats.Reactions = append(stats.Reactions, DemoReaction{AttackerSteamID64: steamID, VictimSteamID64: 2, ReactionTimeMS: 100})
 		}
-		stats.Encounters = append(stats.Encounters, DemoEncounter{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 1500})
+		stats.Encounters = append(stats.Encounters, DemoEncounter{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 1500, ReactionTimeMS: 1500})
 		stats.Reactions = append(stats.Reactions, DemoReaction{AttackerSteamID64: steamID, VictimSteamID64: 2, ReactionTimeMS: 1500})
 		if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
 			t.Fatal(err)
@@ -96,7 +96,7 @@ func TestStoreAndAggregateMultipleDemosBySteamID(t *testing.T) {
 		t.Fatalf("players = %d, want 1", len(report.Players))
 	}
 	row := report.Players[0]
-	if row.DemoCount != 3 || row.Shots != 120 {
+	if row.DemoCount != 3 || row.Shots != 120 || row.Kills != 45 || row.Deaths != 27 {
 		t.Fatalf("bad aggregate: %+v", row)
 	}
 	if row.TTDWeightedMS != 150 || row.TTDSamples != 60 || row.ReactionWeightedMS != 100 || row.ReactionSamples != 60 || !row.Eligible {
@@ -160,6 +160,70 @@ func TestDemosEnabledColumnDefaultsToOne(t *testing.T) {
 	}
 }
 
+func TestSetPlayerSaved(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "stats.db")
+	db, err := openPlayerStatsDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steamID := uint64(76561198000000001)
+	match := &Match{Checksum: "s1", DemoFilePath: "a.dem", DemoFileName: "a", Date: time.Now(), Source: constants.DemoSourceValve}
+	stats := DemoStats{Players: map[uint64]*DemoPlayerStats{steamID: {SteamID64: steamID, Name: "Alice", Rounds: 10, Shots: 10}}, Weapons: map[uint64]map[string]*DemoWeaponStats{}}
+	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	if err := SetPlayerSaved(ctx, dbPath, steamID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetPlayerSaved(ctx, dbPath, 42, true); !errors.Is(err, ErrPlayerNotFound) {
+		t.Fatalf("err = %v, want ErrPlayerNotFound", err)
+	}
+	report, err := buildPlayerStatsReport(ctx, PlayerStatsReportOptions{DatabasePath: dbPath, Config: DefaultSuspicionConfig()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Players) != 1 || !report.Players[0].Saved {
+		t.Fatalf("expected saved player, got %+v", report.Players)
+	}
+	if err := SetPlayerSaved(ctx, dbPath, steamID, false); err != nil {
+		t.Fatal(err)
+	}
+	report, err = buildPlayerStatsReport(ctx, PlayerStatsReportOptions{DatabasePath: dbPath, Config: DefaultSuspicionConfig()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Players[0].Saved {
+		t.Fatalf("expected unsaved player, got %+v", report.Players[0])
+	}
+}
+
+func TestMigrationAddsReactionTimeColumn(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "stats.db")
+	db, err := openPlayerStatsDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE encounters DROP COLUMN reaction_time_ms`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	db, err = openPlayerStatsDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	exists, err := sqliteColumnExists(db, "encounters", "reaction_time_ms")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatal("reaction_time_ms column missing after migration")
+	}
+}
+
 func TestReportExcludesDisabledDemos(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "stats.db")
@@ -173,7 +237,7 @@ func TestReportExcludesDisabledDemos(t *testing.T) {
 		stats := DemoStats{
 			Players:    map[uint64]*DemoPlayerStats{steamID: {SteamID64: steamID, Name: "Alice", Rounds: 10, Shots: 50, HitShots: 25}},
 			Weapons:    map[uint64]map[string]*DemoWeaponStats{steamID: {"AK-47": {SteamID64: steamID, WeaponName: "AK-47", Shots: 50, HitShots: 25}}},
-			Encounters: []DemoEncounter{{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 150}},
+			Encounters: []DemoEncounter{{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 150, ReactionTimeMS: 100}},
 			Reactions:  []DemoReaction{{AttackerSteamID64: steamID, VictimSteamID64: 2, ReactionTimeMS: 100}},
 			Evidence:   []DemoEvidence{{SteamID64: steamID, VictimID: 2, Kind: "test", Value: 1, Details: "{}"}},
 		}
@@ -257,7 +321,7 @@ func TestExportImportRoundtrip(t *testing.T) {
 	stats := DemoStats{
 		Players:    map[uint64]*DemoPlayerStats{steamID: {SteamID64: steamID, Name: "Alice", Rounds: 10, Shots: 50, HitShots: 25, DamageEvents: 20, HeadHitEvents: 5}},
 		Weapons:    map[uint64]map[string]*DemoWeaponStats{steamID: {"AK-47": {SteamID64: steamID, WeaponName: "AK-47", Shots: 50, HitShots: 25}}},
-		Encounters: []DemoEncounter{{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 150, ConfirmedAngle: 3, WeaponName: "AK-47", Snap: true}},
+		Encounters: []DemoEncounter{{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 150, ReactionTimeMS: 100, ConfirmedAngle: 3, WeaponName: "AK-47", Snap: true}},
 		Reactions:  []DemoReaction{{AttackerSteamID64: steamID, VictimSteamID64: 2, ReactionTimeMS: 100, WeaponName: "AK-47"}},
 		Evidence:   []DemoEvidence{{SteamID64: steamID, VictimID: 2, Kind: "test", Value: 1, Details: "{}"}},
 	}
