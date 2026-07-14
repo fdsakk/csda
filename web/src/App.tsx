@@ -1,5 +1,5 @@
-import { DragEvent, Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FileUp, Film, Search, Upload, X } from 'lucide-react';
+import { DragEvent, Fragment, type ReactNode, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, BookOpen, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FileUp, Film, Search, Upload, X } from 'lucide-react';
 import { Demo, getJobs, getReport, importStats, Job, Player, Report, setDemoEnabled, setPlayerSaved, uploadDemos } from './api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -527,11 +527,87 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
   );
 }
 
+function GuideSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-2 border-b border-border pb-5 last:border-0">
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      <div className="space-y-2 text-sm leading-5 text-muted-foreground">{children}</div>
+    </section>
+  );
+}
+
+function GuideItem({ term, children }: { term: string; children: ReactNode }) {
+  return <p><span className="font-medium text-foreground">{term}</span> — {children}</p>;
+}
+
+function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  useEffect(() => {
+    if (!open) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <>
+      <button aria-label="Close guide" className="fixed inset-0 z-40 cursor-default bg-black/30" onClick={onClose} />
+      <aside aria-label="Cheat sheet" className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l border-border bg-background shadow-2xl">
+        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div>
+            <h2 className="text-base font-semibold">Cheat sheet: how to read the analysis</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Use signals to choose what to review in a demo — never as an automatic verdict.</p>
+          </div>
+          <Button variant="ghost" size="icon" aria-label="Close cheat sheet" onClick={onClose}><X className="size-4" /></Button>
+        </header>
+        <div className="cheat-sheet-scroll min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
+          <GuideSection title="Start here">
+            <GuideItem term="Status">A review priority, not proof. Start with `Watch`, `Review` or `Critical`, then expand the row and inspect the triggered signals.</GuideItem>
+            <GuideItem term="Samples">Check the number of demos, shots and sample count (`n=`). A small sample can make an ordinary streak look extreme.</GuideItem>
+            <GuideItem term="Workflow">Use the table to find a player, open their row, note multiple independent signals, then review the relevant rounds in the demo.</GuideItem>
+          </GuideSection>
+
+          <GuideSection title="Basic combat context">
+            <GuideItem term="Demos / shots">The amount of evidence available. More unique demos and weapon-fire events make a comparison more useful.</GuideItem>
+            <GuideItem term="Kills / deaths">Impact context only. A high K/D is never, by itself, evidence of cheating.</GuideItem>
+            <GuideItem term="Accuracy">Tracked hit shots divided by tracked weapon shots. Compare weapon choice and sample size; AWP, pistols and rifles behave differently.</GuideItem>
+            <GuideItem term="Head hit / HS kills">Head-hit rate uses every damaging hit; HS-kill rate uses only finishing headshots. High values can be skill, weapon choice or close-range play.</GuideItem>
+          </GuideSection>
+
+          <GuideSection title="Exposure and response">
+            <GuideItem term="TTD">Time from first spotted tick to first damage. The table shows a round-weighted median; `p10` in details is the fast 10% tail. Repeated low TTD is more relevant than one fast duel.</GuideItem>
+            <GuideItem term="Reaction">Time from first spotted tick to first shot. It is a demo-derived estimate, not a laboratory reaction-time test; pre-aim, sound cues and prediction affect it.</GuideItem>
+            <GuideItem term="Crosshair @ exposure">Median angular distance from crosshair to opponent at confirmed exposure. Lower means stronger crosshair placement, not cheating by itself.</GuideItem>
+            <GuideItem term="First shot error">Median angular distance at the first shot. Read it together with TTD and reaction instead of treating it as a standalone verdict.</GuideItem>
+          </GuideSection>
+
+          <GuideSection title="Suspicion signals">
+            <GuideItem term="Unspotted damage">Damage where the analyzer did not have a confirmed spotted state. Check the demo for sound, teammate information, wallbang lines, smokes and replay limitations before judging it.</GuideItem>
+            <GuideItem term="First-bullet head / snap">Signals around unusually accurate first shots and fast aim reduction. They are strongest when repeated over many encounters and paired with unusual TTD or reactions.</GuideItem>
+            <GuideItem term="Smoke / wall kills">Useful review context, but legitimate wallbangs and common angles are expected in Counter-Strike. Look for repetition and timing, not isolated kills.</GuideItem>
+            <GuideItem term="Triggered signals">Each badge in the expanded row states the rule, points and `n=` sample count that contributed to the status.</GuideItem>
+          </GuideSection>
+
+          <GuideSection title="Saved players and demos">
+            <GuideItem term="Bookmark">Use the bookmark in the Status column to pin a player to the top while reviewing them later.</GuideItem>
+            <GuideItem term="Demos">The Demos button lets you enable or disable a demo from aggregates and export/import the saved statistics set.</GuideItem>
+          </GuideSection>
+
+          <GuideSection title="Decision rule">
+            <p>One metric is a reason to look, not a conclusion. Prioritize players with enough samples and multiple independent signals, then validate them against the demo timeline.</p>
+          </GuideSection>
+        </div>
+      </aside>
+    </>
+  );
+}
+
 export default function App() {
   const [report, setReport] = useState<Report>(EMPTY_REPORT);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [guideOpen, setGuideOpen] = useState(false);
   const completedRef = useRef('');
 
   const loadAll = useCallback(async () => {
@@ -573,7 +649,10 @@ export default function App() {
           <h1 className="text-xl font-semibold">CS2 demo analysis</h1>
           <p className="text-sm text-muted-foreground">Upload demos to build the player baseline and review flagged accounts.</p>
         </div>
-        {!loading ? <DemosSection demos={report.importedDemos ?? []} onChanged={() => void loadAll()} /> : null}
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setGuideOpen(true)}><BookOpen className="size-4" /> Cheat sheet</Button>
+          {!loading ? <DemosSection demos={report.importedDemos ?? []} onChanged={() => void loadAll()} /> : null}
+        </div>
       </div>
 
       <Dropzone onQueued={(job) => setJobs((current) => [job, ...current])} />
@@ -586,6 +665,7 @@ export default function App() {
       ) : (
         <PlayerTable players={players} onToggleSaved={(player) => void toggleSaved(player)} />
       )}
+      <CheatSheet open={guideOpen} onClose={() => setGuideOpen(false)} />
     </div>
   );
 }
