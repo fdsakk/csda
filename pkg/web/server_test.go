@@ -1,13 +1,18 @@
 package web
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+
+	"github.com/klauspost/compress/zstd"
+	"github.com/ulikunitz/xz/lzma"
 )
 
 func TestHealthAndEmptyReport(t *testing.T) {
@@ -48,7 +53,7 @@ func TestUploadRejectsNonDemo(t *testing.T) {
 	}
 }
 
-func TestUploadEnqueuesDemo(t *testing.T) {
+func TestUploadEnqueuesDemoWithAutomaticSource(t *testing.T) {
 	root := t.TempDir()
 	server, err := NewServer(Options{DatabasePath: filepath.Join(root, "stats.db"), UploadsPath: filepath.Join(root, "uploads")})
 	if err != nil {
@@ -60,7 +65,7 @@ func TestUploadEnqueuesDemo(t *testing.T) {
 	part, _ := writer.CreateFormFile("demos", "sample.dem")
 	_, _ = part.Write([]byte("not a real demo"))
 	_ = writer.Close()
-	request := httptest.NewRequest(http.MethodPost, "/api/uploads?source=valve", &body)
+	request := httptest.NewRequest(http.MethodPost, "/api/uploads", &body)
 	request.Header.Set("Content-Type", writer.FormDataContentType())
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
@@ -73,6 +78,185 @@ func TestUploadEnqueuesDemo(t *testing.T) {
 	}
 	if job.ID == "" || len(job.Files) != 1 {
 		t.Fatalf("bad job: %+v", job)
+	}
+	server.mu.RLock()
+	source := server.jobs[job.ID].source
+	server.mu.RUnlock()
+	if source != "" {
+		t.Fatalf("source=%q, want automatic detection", source)
+	}
+}
+
+func zipBytes(t *testing.T, entries map[string]string) []byte {
+	t.Helper()
+	var body bytes.Buffer
+	archive := zip.NewWriter(&body)
+	for name, contents := range entries {
+		file, err := archive.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := file.Write([]byte(contents)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return body.Bytes()
+}
+
+func zstdZIPBytes(t *testing.T, entries map[string]string) []byte {
+	t.Helper()
+	var body bytes.Buffer
+	archive := zip.NewWriter(&body)
+	archive.RegisterCompressor(zstd.ZipMethodWinZip, zstd.ZipCompressor())
+	for name, contents := range entries {
+		file, err := archive.CreateHeader(&zip.FileHeader{Name: name, Method: zstd.ZipMethodWinZip})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := file.Write([]byte(contents)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return body.Bytes()
+}
+
+type lzmaZIPCompressor struct {
+	destination io.Writer
+	input       bytes.Buffer
+}
+
+func (compressor *lzmaZIPCompressor) Write(data []byte) (int, error) {
+	return compressor.input.Write(data)
+}
+
+func (compressor *lzmaZIPCompressor) Close() error {
+	var encoded bytes.Buffer
+	writer, err := lzma.NewWriter(&encoded)
+	if err != nil {
+		return err
+	}
+	if _, err = writer.Write(compressor.input.Bytes()); err != nil {
+		return err
+	}
+	if err = writer.Close(); err != nil {
+		return err
+	}
+	stream := encoded.Bytes()
+	if len(stream) < lzma.HeaderLen {
+		return io.ErrUnexpectedEOF
+	}
+	_, err = io.Copy(compressor.destination, io.MultiReader(
+		bytes.NewReader([]byte{0x10, 0x02, zipLZMAPropertiesSize, 0x00}),
+		bytes.NewReader(stream[:zipLZMAPropertiesSize]),
+		bytes.NewReader(stream[lzma.HeaderLen:]),
+	))
+	return err
+}
+
+func lzmaZIPBytes(t *testing.T, entries map[string]string) []byte {
+	t.Helper()
+	var body bytes.Buffer
+	archive := zip.NewWriter(&body)
+	archive.RegisterCompressor(zipMethodLZMA, func(destination io.Writer) (io.WriteCloser, error) {
+		return &lzmaZIPCompressor{destination: destination}, nil
+	})
+	for name, contents := range entries {
+		file, err := archive.CreateHeader(&zip.FileHeader{Name: name, Method: zipMethodLZMA})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := file.Write([]byte(contents)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return body.Bytes()
+}
+
+func TestUploadExtractsDemosFromZIP(t *testing.T) {
+	root := t.TempDir()
+	server, err := NewServer(Options{DatabasePath: filepath.Join(root, "stats.db"), UploadsPath: filepath.Join(root, "uploads")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, _ := writer.CreateFormFile("demos", "match-demos.zip")
+	_, _ = part.Write(zipBytes(t, map[string]string{
+		"nested/match.dem":  "not a real demo",
+		"nested/readme.txt": "ignore me",
+	}))
+	_ = writer.Close()
+	request := httptest.NewRequest(http.MethodPost, "/api/uploads", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var job Job
+	if err := json.Unmarshal(response.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	if len(job.Files) != 1 || job.Files[0] != "match.dem" {
+		t.Fatalf("files=%v, want [match.dem]", job.Files)
+	}
+}
+
+func TestUploadExtractsDemosFromZstandardZIP(t *testing.T) {
+	server := newTestServer(t)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, _ := writer.CreateFormFile("demos", "match-demos.zip")
+	_, _ = part.Write(zstdZIPBytes(t, map[string]string{"match.dem": "not a real demo"}))
+	_ = writer.Close()
+	request := httptest.NewRequest(http.MethodPost, "/api/uploads", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestUploadExtractsDemosFromLZMAZIP(t *testing.T) {
+	server := newTestServer(t)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, _ := writer.CreateFormFile("demos", "match-demos.zip")
+	_, _ = part.Write(lzmaZIPBytes(t, map[string]string{"match.dem": "not a real demo"}))
+	_ = writer.Close()
+	request := httptest.NewRequest(http.MethodPost, "/api/uploads", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestUploadRejectsZIPWithoutDemos(t *testing.T) {
+	server := newTestServer(t)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, _ := writer.CreateFormFile("demos", "notes.zip")
+	_, _ = part.Write(zipBytes(t, map[string]string{"notes.txt": "no demo here"}))
+	_ = writer.Close()
+	request := httptest.NewRequest(http.MethodPost, "/api/uploads", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

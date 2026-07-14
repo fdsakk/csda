@@ -1,12 +1,17 @@
 package web
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
+	"hash/crc32"
 	"io"
 	"net/http"
 	"os"
@@ -20,9 +25,200 @@ import (
 
 	"github.com/akiver/cs-demo-analyzer/pkg/api"
 	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
+	"github.com/klauspost/compress/zstd"
+	"github.com/ulikunitz/xz/lzma"
 )
 
 const maxUploadBytes int64 = 8 << 30
+
+const (
+	zipMethodLZMA         = 14
+	zipLZMAPropertiesSize = 5
+	maxLZMADictionarySize = 256 << 20
+)
+
+type zipLZMAReadCloser struct {
+	reader       io.Reader
+	file         *os.File
+	checksum     hash.Hash32
+	expectedCRC  uint32
+	expectedSize uint64
+	read         uint64
+}
+
+func (reader *zipLZMAReadCloser) Read(buffer []byte) (int, error) {
+	n, err := reader.reader.Read(buffer)
+	if n > 0 {
+		_, _ = reader.checksum.Write(buffer[:n])
+		reader.read += uint64(n)
+	}
+	if errors.Is(err, io.EOF) && (reader.read != reader.expectedSize || reader.checksum.Sum32() != reader.expectedCRC) {
+		return n, zip.ErrChecksum
+	}
+	return n, err
+}
+
+func (reader *zipLZMAReadCloser) Close() error {
+	return reader.file.Close()
+}
+
+func openZIPLZMAEntry(archivePath string, entry *zip.File) (io.ReadCloser, error) {
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return nil, err
+	}
+	fail := func(err error) (io.ReadCloser, error) {
+		_ = file.Close()
+		return nil, err
+	}
+	offset, err := entry.DataOffset()
+	if err != nil {
+		return fail(err)
+	}
+	compressed := io.NewSectionReader(file, offset, int64(entry.CompressedSize64))
+	var zipHeader [4]byte
+	if _, err := io.ReadFull(compressed, zipHeader[:]); err != nil {
+		return fail(fmt.Errorf("invalid ZIP LZMA header: %w", err))
+	}
+	propertiesSize := binary.LittleEndian.Uint16(zipHeader[2:])
+	if propertiesSize != zipLZMAPropertiesSize {
+		return fail(fmt.Errorf("unsupported ZIP LZMA properties size %d", propertiesSize))
+	}
+	var properties [zipLZMAPropertiesSize]byte
+	if _, err := io.ReadFull(compressed, properties[:]); err != nil {
+		return fail(fmt.Errorf("invalid ZIP LZMA properties: %w", err))
+	}
+	var lzmaHeader [lzma.HeaderLen]byte
+	copy(lzmaHeader[:zipLZMAPropertiesSize], properties[:])
+	binary.LittleEndian.PutUint64(lzmaHeader[zipLZMAPropertiesSize:], entry.UncompressedSize64)
+	decoded, err := (lzma.ReaderConfig{DictCap: maxLZMADictionarySize}).NewReader(io.MultiReader(bytes.NewReader(lzmaHeader[:]), compressed))
+	if err != nil {
+		return fail(err)
+	}
+	return &zipLZMAReadCloser{
+		reader:       decoded,
+		file:         file,
+		checksum:     crc32.NewIEEE(),
+		expectedCRC:  entry.CRC32,
+		expectedSize: entry.UncompressedSize64,
+	}, nil
+}
+
+func openZIPEntry(archivePath string, entry *zip.File) (io.ReadCloser, error) {
+	if entry.Method == zipMethodLZMA {
+		return openZIPLZMAEntry(archivePath, entry)
+	}
+	return entry.Open()
+}
+
+type uploadCollector struct {
+	dir   string
+	bytes int64
+	paths []string
+	names []string
+}
+
+func (uploads *uploadCollector) addDemo(name string, reader io.Reader) error {
+	filename := filepath.Base(strings.ReplaceAll(name, "\\", "/"))
+	if filename == "." || filename == "" || !strings.EqualFold(filepath.Ext(filename), ".dem") {
+		return fmt.Errorf("%s is not a .dem file", name)
+	}
+
+	remaining := maxUploadBytes - uploads.bytes
+	if remaining <= 0 {
+		return fmt.Errorf("demos exceed the %d GiB upload limit", maxUploadBytes>>30)
+	}
+	base := strings.TrimSuffix(filename, filepath.Ext(filename))
+	extension := filepath.Ext(filename)
+	for index := 0; ; index++ {
+		candidate := filename
+		if index > 0 {
+			candidate = fmt.Sprintf("%s (%d)%s", base, index, extension)
+		}
+		path := filepath.Join(uploads.dir, candidate)
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		written, copyErr := io.Copy(file, io.LimitReader(reader, remaining+1))
+		closeErr := file.Close()
+		if copyErr != nil || closeErr != nil || written > remaining {
+			_ = os.Remove(path)
+			if copyErr != nil {
+				return copyErr
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+			return fmt.Errorf("demos exceed the %d GiB upload limit", maxUploadBytes>>30)
+		}
+		uploads.bytes += written
+		uploads.paths = append(uploads.paths, path)
+		uploads.names = append(uploads.names, candidate)
+		return nil
+	}
+}
+
+func saveUploadArchive(dir string, reader io.Reader) (string, error) {
+	file, err := os.CreateTemp(dir, ".upload-*.zip")
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	_, copyErr := io.Copy(file, reader)
+	closeErr := file.Close()
+	if copyErr != nil || closeErr != nil {
+		_ = os.Remove(path)
+		if copyErr != nil {
+			return "", copyErr
+		}
+		return "", closeErr
+	}
+	return path, nil
+}
+
+func (uploads *uploadCollector) addZip(path string) error {
+	archive, err := zip.OpenReader(path)
+	if err != nil {
+		return fmt.Errorf("invalid ZIP archive: %w", err)
+	}
+	defer archive.Close()
+	archive.RegisterDecompressor(zstd.ZipMethodWinZip, zstd.ZipDecompressor())
+	archive.RegisterDecompressor(zstd.ZipMethodPKWare, zstd.ZipDecompressor())
+
+	demos := 0
+	for _, entry := range archive.File {
+		if entry.FileInfo().IsDir() || !strings.EqualFold(filepath.Ext(entry.Name), ".dem") {
+			continue
+		}
+		if entry.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("ZIP entry %q is a symlink", entry.Name)
+		}
+		if entry.UncompressedSize64 > uint64(maxUploadBytes-uploads.bytes) {
+			return fmt.Errorf("demos exceed the %d GiB upload limit", maxUploadBytes>>30)
+		}
+		reader, openErr := openZIPEntry(path, entry)
+		if openErr != nil {
+			return openErr
+		}
+		copyErr := uploads.addDemo(entry.Name, reader)
+		closeErr := reader.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		demos++
+	}
+	if demos == 0 {
+		return errors.New("ZIP archive contains no .dem files")
+	}
+	return nil
+}
 
 type Options struct {
 	DatabasePath string
@@ -66,6 +262,8 @@ type Server struct {
 	queue   chan string
 	ctx     context.Context
 	cancel  context.CancelFunc
+	done    chan struct{}
+	close   sync.Once
 }
 
 func NewServer(options Options) (*Server, error) {
@@ -75,20 +273,25 @@ func NewServer(options Options) (*Server, error) {
 	if options.UploadsPath == "" {
 		options.UploadsPath = "uploads"
 	}
-	if options.Source == "" {
-		options.Source = constants.DemoSourceValve
-	}
 	if err := os.MkdirAll(options.UploadsPath, 0o755); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	server := &Server{options: options, mux: http.NewServeMux(), jobs: make(map[string]*Job), queue: make(chan string, 32), ctx: ctx, cancel: cancel}
+	server := &Server{options: options, mux: http.NewServeMux(), jobs: make(map[string]*Job), queue: make(chan string, 32), ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	server.routes()
-	go server.worker()
+	go func() {
+		defer close(server.done)
+		server.worker()
+	}()
 	return server, nil
 }
 
-func (s *Server) Close()                { s.cancel() }
+func (s *Server) Close() {
+	s.close.Do(func() {
+		s.cancel()
+		<-s.done
+	})
+}
 func (s *Server) Handler() http.Handler { return s.mux }
 
 func (s *Server) routes() {
@@ -164,7 +367,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	var paths, names []string
+	uploads := uploadCollector{dir: dir}
 	cleanup := func() { _ = os.RemoveAll(dir) }
 	for {
 		part, nextErr := reader.NextPart()
@@ -181,35 +384,29 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 			part.Close()
 			continue
 		}
-		if !strings.EqualFold(filepath.Ext(filename), ".dem") {
-			part.Close()
-			cleanup()
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("%s is not a .dem file", filename)})
-			return
-		}
-		path := filepath.Join(dir, filename)
-		file, createErr := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if createErr != nil {
-			part.Close()
-			cleanup()
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": createErr.Error()})
-			return
-		}
-		_, copyErr := io.Copy(file, part)
-		closeErr := file.Close()
-		part.Close()
-		if copyErr != nil || closeErr != nil {
-			cleanup()
-			if copyErr == nil {
-				copyErr = closeErr
+		var uploadErr error
+		switch {
+		case strings.EqualFold(filepath.Ext(filename), ".dem"):
+			uploadErr = uploads.addDemo(filename, part)
+		case strings.EqualFold(filepath.Ext(filename), ".zip"):
+			archivePath, saveErr := saveUploadArchive(dir, part)
+			if saveErr != nil {
+				uploadErr = saveErr
+			} else {
+				uploadErr = uploads.addZip(archivePath)
+				_ = os.Remove(archivePath)
 			}
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": copyErr.Error()})
+		default:
+			uploadErr = fmt.Errorf("%s is not a .dem or .zip file", filename)
+		}
+		part.Close()
+		if uploadErr != nil {
+			cleanup()
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": uploadErr.Error()})
 			return
 		}
-		paths = append(paths, path)
-		names = append(names, filename)
 	}
-	if len(paths) == 0 {
+	if len(uploads.paths) == 0 {
 		cleanup()
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no .dem files uploaded"})
 		return
@@ -218,12 +415,14 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if source == "" {
 		source = s.options.Source
 	}
-	if err := api.ValidateDemoSource(source); err != nil {
-		cleanup()
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
+	if source != "" {
+		if err := api.ValidateDemoSource(source); err != nil {
+			cleanup()
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 	}
-	job := &Job{ID: id, Status: JobQueued, Files: names, CreatedAt: time.Now().UTC(), Total: len(paths), paths: paths, source: source}
+	job := &Job{ID: id, Status: JobQueued, Files: uploads.names, CreatedAt: time.Now().UTC(), Total: len(uploads.paths), paths: uploads.paths, source: source}
 	s.mu.Lock()
 	s.jobs[id] = job
 	s.mu.Unlock()
@@ -316,10 +515,16 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) worker() {
 	for {
+		if s.ctx.Err() != nil {
+			return
+		}
 		select {
 		case <-s.ctx.Done():
 			return
 		case id := <-s.queue:
+			if s.ctx.Err() != nil {
+				return
+			}
 			s.mu.Lock()
 			job := s.jobs[id]
 			now := time.Now().UTC()

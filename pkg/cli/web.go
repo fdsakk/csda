@@ -22,13 +22,15 @@ func runWeb(args []string) int {
 	database := fs.String("db", "player-stats.db", "SQLite player statistics database path")
 	uploads := fs.String("uploads", "uploads", "Folder used to store uploaded demos")
 	assets := fs.String("assets", "web/dist", "Built React assets folder")
-	source := fs.String("source", "valve", "Default demo source")
+	source := fs.String("source", "", "Force demo source (default: detect automatically)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if err := api.ValidateDemoSource(constants.DemoSource(*source)); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 2
+	if *source != "" {
+		if err := api.ValidateDemoSource(constants.DemoSource(*source)); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
 	}
 	webServer, err := apiweb.NewServer(apiweb.Options{DatabasePath: *database, UploadsPath: *uploads, AssetsPath: *assets, Source: constants.DemoSource(*source)})
 	if err != nil {

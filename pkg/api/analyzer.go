@@ -136,6 +136,11 @@ func analyzeDemo(demoPath string, options AnalyzeDemoOptions) (*Match, error) {
 	source := options.Source
 	if source == "" {
 		source = d.GetDemoSource(demo)
+		// Generic CSTV demos do not always expose a recognizable server name.
+		// Preserve the former web default while still using detected platforms.
+		if source == constants.DemoSourceUnknown {
+			source = constants.DemoSourceValve
+		}
 	}
 
 	if demo.IsSource2() && demo.Type == constants.DemoTypePOV {

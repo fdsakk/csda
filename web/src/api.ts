@@ -151,12 +151,12 @@ export async function importStats(file: File): Promise<{ imported: number; skipp
   return readJSON(await fetch('/api/import', { method: 'POST', body: file }));
 }
 
-export function uploadDemos(files: File[], source: string, onProgress: (progress: number) => void): Promise<Job> {
+export function uploadDemos(files: File[], onProgress: (progress: number) => void): Promise<Job> {
   return new Promise((resolve, reject) => {
     const form = new FormData();
     files.forEach((file) => form.append('demos', file));
     const request = new XMLHttpRequest();
-    request.open('POST', `/api/uploads?source=${encodeURIComponent(source)}`);
+    request.open('POST', '/api/uploads');
     request.upload.addEventListener('progress', (event) => {
       if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
     });
