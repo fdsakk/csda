@@ -51,8 +51,11 @@ type Job struct {
 	Error     string                      `json:"error,omitempty"`
 	Processed int                         `json:"processed"`
 	Total     int                         `json:"total"`
-	paths     []string
-	source    constants.DemoSource
+	// Progress is the overall job progress in percent, including partial
+	// parse progress of demos still being analyzed.
+	Progress float64 `json:"progress"`
+	paths    []string
+	source   constants.DemoSource
 }
 
 type Server struct {
@@ -262,13 +265,19 @@ func (s *Server) handlePlayerSaved(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Saved *bool `json:"saved"`
+		Saved  *bool `json:"saved"`
+		Banned *bool `json:"banned"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Saved == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `expected JSON body with "saved" boolean`})
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (body.Saved == nil && body.Banned == nil) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `expected JSON body with a "saved" or "banned" boolean`})
 		return
 	}
-	err = api.SetPlayerSaved(r.Context(), s.options.DatabasePath, steamID, *body.Saved)
+	if body.Saved != nil {
+		err = api.SetPlayerSaved(r.Context(), s.options.DatabasePath, steamID, *body.Saved)
+	}
+	if err == nil && body.Banned != nil {
+		err = api.SetPlayerBanned(r.Context(), s.options.DatabasePath, steamID, *body.Banned)
+	}
 	if errors.Is(err, api.ErrPlayerNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "player not found"})
 		return
@@ -317,16 +326,32 @@ func (s *Server) worker() {
 			job.Status = JobRunning
 			job.StartedAt = &now
 			s.mu.Unlock()
+			fractions := make(map[string]float64, len(job.paths))
+			total := len(job.paths)
 			result, err := api.BuildPlayerStatsDatabase(s.ctx, api.PlayerStatsBuildOptions{
 				DatabasePath:                s.options.DatabasePath,
 				DemoPaths:                   job.paths,
 				Source:                      job.source,
-				Jobs:                        1,
+				Jobs:                        4,
 				VisibilityConfirmationTicks: 3,
 				OnDemoProcessed: func(processed, total int) {
 					s.mu.Lock()
 					job.Processed = processed
 					job.Total = total
+					s.mu.Unlock()
+				},
+				// Every demo ends at fraction 1 (finished or skipped), so the
+				// sum over all demos is the true overall progress.
+				OnDemoProgress: func(path string, fraction float64) {
+					s.mu.Lock()
+					fractions[path] = fraction
+					sum := 0.0
+					for _, f := range fractions {
+						sum += f
+					}
+					if total > 0 {
+						job.Progress = 100 * sum / float64(total)
+					}
 					s.mu.Unlock()
 				},
 			})

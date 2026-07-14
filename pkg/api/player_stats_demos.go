@@ -34,12 +34,21 @@ func SetDemoEnabled(ctx context.Context, databasePath, checksum string, enabled 
 
 // SetPlayerSaved marks or unmarks a player as manually tracked.
 func SetPlayerSaved(ctx context.Context, databasePath string, steamID uint64, saved bool) error {
+	return setPlayerFlag(ctx, databasePath, steamID, "saved", saved)
+}
+
+// SetPlayerBanned marks or unmarks a player as already banned.
+func SetPlayerBanned(ctx context.Context, databasePath string, steamID uint64, banned bool) error {
+	return setPlayerFlag(ctx, databasePath, steamID, "banned", banned)
+}
+
+func setPlayerFlag(ctx context.Context, databasePath string, steamID uint64, column string, value bool) error {
 	db, err := openPlayerStatsDB(databasePath)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	result, err := db.ExecContext(ctx, `UPDATE players SET saved=? WHERE steam_id=?`, saved, steamID)
+	result, err := db.ExecContext(ctx, `UPDATE players SET `+column+`=? WHERE steam_id=?`, value, steamID)
 	if err != nil {
 		return err
 	}

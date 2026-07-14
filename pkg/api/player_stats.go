@@ -18,7 +18,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const playerStatsAnalysisVersion = 4
+const playerStatsAnalysisVersion = 5
 
 type DemoImportError struct {
 	Path  string `json:"path"`
@@ -33,10 +33,16 @@ type PlayerStatsBuildOptions struct {
 	Source                      constants.DemoSource
 	Jobs                        int
 	VisibilityConfirmationTicks int
-	Force                       bool
+	// TrisDir holds awpy-style .tri map geometry (or a tris.zip archive) used
+	// for geometric visibility checks. Defaults to "tris".
+	TrisDir string
+	Force   bool
 	// OnDemoProcessed, when set, is called after each demo finishes (imported,
 	// skipped or failed) with the number processed so far and the total.
 	OnDemoProcessed func(processed, total int)
+	// OnDemoProgress, when set, receives per-demo parse progress as a 0..1
+	// fraction; it is always called with 1 when a demo finishes or is skipped.
+	OnDemoProgress func(path string, fraction float64)
 }
 
 type PlayerStatsBuildResult struct {
@@ -127,7 +133,7 @@ CREATE TABLE IF NOT EXISTS demos (
 );
 CREATE TABLE IF NOT EXISTS players (
   steam_id INTEGER PRIMARY KEY, latest_name TEXT NOT NULL, names TEXT NOT NULL, updated_at TEXT NOT NULL,
-  saved INTEGER NOT NULL DEFAULT 0
+  saved INTEGER NOT NULL DEFAULT 0, banned INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS player_demo_stats (
   demo_id INTEGER NOT NULL REFERENCES demos(id) ON DELETE CASCADE,
@@ -215,6 +221,7 @@ INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, CURRENT_
 	addedColumns := [][3]string{
 		{"player_demo_stats", "deaths", `INTEGER NOT NULL DEFAULT 0`},
 		{"players", "saved", `INTEGER NOT NULL DEFAULT 0`},
+		{"players", "banned", `INTEGER NOT NULL DEFAULT 0`},
 	}
 	for _, column := range addedColumns {
 		exists, checkErr := sqliteColumnExists(db, column[0], column[1])
@@ -314,8 +321,12 @@ type analyzedDemoStats struct {
 }
 
 func analyzeOneDemoForStats(path string, options PlayerStatsBuildOptions) analyzedDemoStats {
-	collector := newDemoStatsCollector(options.VisibilityConfirmationTicks)
-	match, err := analyzeDemo(path, AnalyzeDemoOptions{Source: options.Source, statsCollector: collector})
+	collector := newDemoStatsCollector(options.VisibilityConfirmationTicks, options.TrisDir)
+	analyzeOptions := AnalyzeDemoOptions{Source: options.Source, statsCollector: collector}
+	if options.OnDemoProgress != nil {
+		analyzeOptions.onProgress = func(fraction float64) { options.OnDemoProgress(path, fraction) }
+	}
+	match, err := analyzeDemo(path, analyzeOptions)
 	return analyzedDemoStats{path: path, match: match, stats: collector.result, err: err}
 }
 
@@ -334,6 +345,9 @@ func BuildPlayerStatsDatabase(ctx context.Context, options PlayerStatsBuildOptio
 	}
 	if options.VisibilityConfirmationTicks <= 0 {
 		options.VisibilityConfirmationTicks = 3
+	}
+	if options.TrisDir == "" {
+		options.TrisDir = "tris"
 	}
 
 	result := &PlayerStatsBuildResult{}
@@ -385,6 +399,9 @@ func BuildPlayerStatsDatabase(ctx context.Context, options PlayerStatsBuildOptio
 		processed++
 		if options.OnDemoProcessed != nil {
 			options.OnDemoProcessed(processed, total)
+		}
+		if options.OnDemoProgress != nil {
+			options.OnDemoProgress(analyzed.path, 1)
 		}
 		if analyzed.err != nil {
 			result.Failed++

@@ -53,7 +53,10 @@ type PlayerStatsReportRow struct {
 	TTDWeightedMS         float64               `json:"ttdWeightedMs"`
 	TTDP10MS              float64               `json:"ttdP10Ms"`
 	TTDUnder190Rate       float64               `json:"ttdUnder190Rate"`
-	ReactionSamples       int                   `json:"reactionSamples"`
+	// 20 bins of 50ms across 0–1000ms, for the UI distribution charts.
+	TTDHistogram      []int                 `json:"ttdHistogram"`
+	ReactionHistogram []int                 `json:"reactionHistogram"`
+	ReactionSamples   int                   `json:"reactionSamples"`
 	ReactionMedianMS      float64               `json:"reactionMedianMs"`
 	ReactionWeightedMS    float64               `json:"reactionWeightedMs"`
 	ReactionP10MS         float64               `json:"reactionP10Ms"`
@@ -68,6 +71,7 @@ type PlayerStatsReportRow struct {
 	ScopedShots           int                   `json:"scopedShots"`
 	ScopedHitRate         float64               `json:"scopedHitRate"`
 	Saved                 bool                  `json:"saved"`
+	Banned                bool                  `json:"banned"`
 	Eligible              bool                  `json:"eligible"`
 	SuspicionScore        int                   `json:"suspicionScore"`
 	Status                string                `json:"status"`
@@ -153,6 +157,16 @@ func ratio(numerator, denominator int) float64 {
 		return 0
 	}
 	return float64(numerator) / float64(denominator)
+}
+
+// histogramMS buckets millisecond samples into 20 bins of 50ms (0–1000ms).
+// Samples are already clamped to that range by the caller.
+func histogramMS(values []float64) []int {
+	bins := make([]int, 20)
+	for _, value := range values {
+		bins[min(int(value/50), 19)]++
+	}
+	return bins
 }
 
 func percentile(values []float64, p float64) float64 {
@@ -253,7 +267,7 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 	}
 	report := &PlayerStatsReport{}
 
-	rows, err := db.QueryContext(ctx, `SELECT p.steam_id,p.latest_name,p.names,p.saved,COUNT(s.demo_id),COALESCE(SUM(s.rounds),0),COALESCE(SUM(s.shots),0),COALESCE(SUM(s.hit_shots),0),COALESCE(SUM(s.damage_events),0),COALESCE(SUM(s.head_hit_events),0),COALESCE(SUM(s.kills),0),COALESCE(SUM(s.deaths),0),COALESCE(SUM(s.headshot_kills),0),COALESCE(SUM(s.smoke_kills),0),COALESCE(SUM(s.wall_kills),0),COALESCE(SUM(s.unspotted_damage_events),0),COALESCE(SUM(s.first_bullet_encounters),0),COALESCE(SUM(s.first_bullet_head_hits),0),COALESCE(SUM(s.snap_events),0),COALESCE(SUM(s.ttd_samples),0),COALESCE(SUM(s.ttd_sum_ms),0),COALESCE(SUM(s.moving_shots),0),COALESCE(SUM(s.moving_hit_shots),0),COALESCE(SUM(s.airborne_shots),0),COALESCE(SUM(s.airborne_hit_shots),0),COALESCE(SUM(s.flashed_shots),0),COALESCE(SUM(s.flashed_hit_shots),0),COALESCE(SUM(s.scoped_shots),0),COALESCE(SUM(s.scoped_hit_shots),0) FROM players p JOIN player_demo_stats s ON s.steam_id=p.steam_id JOIN demos d ON d.id=s.demo_id AND d.enabled=1 GROUP BY p.steam_id,p.latest_name,p.names,p.saved ORDER BY p.steam_id`)
+	rows, err := db.QueryContext(ctx, `SELECT p.steam_id,p.latest_name,p.names,p.saved,p.banned,COUNT(s.demo_id),COALESCE(SUM(s.rounds),0),COALESCE(SUM(s.shots),0),COALESCE(SUM(s.hit_shots),0),COALESCE(SUM(s.damage_events),0),COALESCE(SUM(s.head_hit_events),0),COALESCE(SUM(s.kills),0),COALESCE(SUM(s.deaths),0),COALESCE(SUM(s.headshot_kills),0),COALESCE(SUM(s.smoke_kills),0),COALESCE(SUM(s.wall_kills),0),COALESCE(SUM(s.unspotted_damage_events),0),COALESCE(SUM(s.first_bullet_encounters),0),COALESCE(SUM(s.first_bullet_head_hits),0),COALESCE(SUM(s.snap_events),0),COALESCE(SUM(s.ttd_samples),0),COALESCE(SUM(s.ttd_sum_ms),0),COALESCE(SUM(s.moving_shots),0),COALESCE(SUM(s.moving_hit_shots),0),COALESCE(SUM(s.airborne_shots),0),COALESCE(SUM(s.airborne_hit_shots),0),COALESCE(SUM(s.flashed_shots),0),COALESCE(SUM(s.flashed_hit_shots),0),COALESCE(SUM(s.scoped_shots),0),COALESCE(SUM(s.scoped_hit_shots),0) FROM players p JOIN player_demo_stats s ON s.steam_id=p.steam_id JOIN demos d ON d.id=s.demo_id AND d.enabled=1 GROUP BY p.steam_id,p.latest_name,p.names,p.saved,p.banned ORDER BY p.steam_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +277,7 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 		var storedTTDSamples int
 		var storedTTDSum float64
 		var movingHits, airborneHits, flashedHits, scopedHits int
-		if err := rows.Scan(&row.SteamID64, &row.Name, &names, &row.Saved, &row.DemoCount, &row.Rounds, &row.Shots, &row.HitShots, &row.DamageEvents, &row.HeadHitEvents, &row.Kills, &row.Deaths, &row.HeadshotKills, &row.SmokeKills, &row.WallKills, &row.UnspottedDamageEvents, &row.FirstBulletEncounters, &row.FirstBulletHeadHits, &row.SnapEvents, &storedTTDSamples, &storedTTDSum, &row.MovingShots, &movingHits, &row.AirborneShots, &airborneHits, &row.FlashedShots, &flashedHits, &row.ScopedShots, &scopedHits); err != nil {
+		if err := rows.Scan(&row.SteamID64, &row.Name, &names, &row.Saved, &row.Banned, &row.DemoCount, &row.Rounds, &row.Shots, &row.HitShots, &row.DamageEvents, &row.HeadHitEvents, &row.Kills, &row.Deaths, &row.HeadshotKills, &row.SmokeKills, &row.WallKills, &row.UnspottedDamageEvents, &row.FirstBulletEncounters, &row.FirstBulletHeadHits, &row.SnapEvents, &storedTTDSamples, &storedTTDSum, &row.MovingShots, &movingHits, &row.AirborneShots, &airborneHits, &row.FlashedShots, &flashedHits, &row.ScopedShots, &scopedHits); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -332,6 +346,8 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 			}
 		}
 		ttdRows.Close()
+		row.TTDHistogram = histogramMS(ttdSamples)
+		row.ReactionHistogram = histogramMS(reactionSamples)
 		row.TTDSamples = len(ttdSamples)
 		row.TTDMedianMS = percentile(ttdSamples, .5)
 		row.TTDWeightedMS = roundWeightedDemoMedian(ttdByDemo)

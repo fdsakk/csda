@@ -79,6 +79,23 @@ func getNetMessageDecryptionKeyFromPubKey(clDecryptDataKeyPub uint64) []byte {
 	return []byte(strings.ToUpper(fmt.Sprintf("%016x", clDecryptDataKeyPub)))
 }
 
+var fileNameDatePattern = regexp.MustCompile(`(20\d{6})-(\d{4})`)
+
+// getDateFromFileName extracts the recording date from names such as
+// auto-20260711-1006-de_mirage. More reliable than the file modification time,
+// which uploads and copies rewrite.
+func getDateFromFileName(demoPath string) (time.Time, bool) {
+	match := fileNameDatePattern.FindStringSubmatch(filepath.GetFileNameWithoutExtension(demoPath))
+	if match == nil {
+		return time.Time{}, false
+	}
+	date, err := time.ParseInLocation("20060102-1504", match[1]+"-"+match[2], time.Local)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return date, true
+}
+
 func getDateFromMatchTime(matchTime uint32) time.Time {
 	return time.Unix(int64(matchTime), 0)
 }
@@ -114,6 +131,9 @@ func GetDemoFromPath(demoPath string) (*Demo, error) {
 	var networkProtocol int
 	var buildNumber int
 	var date = stats.ModTime()
+	if fileNameDate, ok := getDateFromFileName(demoPath); ok {
+		date = fileNameDate
+	}
 	var shareCode string
 	var netMessageDecryptionPublicKey []byte
 	demoType := constants.DemoTypeGOTV

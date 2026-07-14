@@ -1,6 +1,6 @@
 import { DragEvent, Fragment, type ReactNode, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, BookOpen, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FileUp, Film, Search, Upload, X } from 'lucide-react';
-import { Demo, getJobs, getReport, importStats, Job, Player, Report, setDemoEnabled, setPlayerSaved, uploadDemos } from './api';
+import { ArrowDown, ArrowUp, Ban, BookOpen, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FileUp, Film, Search, Upload, X } from 'lucide-react';
+import { Demo, getJobs, getReport, importStats, Job, Player, PlayerWeapon, Report, setDemoEnabled, setPlayerBanned, setPlayerSaved, uploadDemos } from './api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -132,7 +132,7 @@ function Jobs({ jobs }: { jobs: Job[] }) {
       {active.map((job) => {
         const total = job.total || job.files.length || 1;
         const running = job.status === 'running';
-        const percent = running ? Math.round((job.processed / total) * 100) : 0;
+        const percent = running ? Math.round(job.progress || (job.processed / total) * 100) : 0;
         return (
           <div key={job.id} className="rounded-lg border border-border bg-card p-4">
             <div className="flex items-center justify-between gap-3 text-sm">
@@ -140,8 +140,8 @@ function Jobs({ jobs }: { jobs: Job[] }) {
                 <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-warning" />
                 <span className="truncate text-foreground">{job.files.join(', ')}</span>
               </span>
-              <span className="shrink-0 text-muted-foreground">
-                {running ? `Analyzing ${job.processed}/${total}` : 'Queued'}
+              <span className="shrink-0 tabular-nums text-muted-foreground">
+                {running ? `Analyzing ${job.processed}/${total} · ${percent}%` : 'Queued'}
               </span>
             </div>
             <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
@@ -157,45 +157,199 @@ function Jobs({ jobs }: { jobs: Job[] }) {
   );
 }
 
-function PlayerDetails({ player }: { player: Player }) {
+const HIST_BIN_MS = 50;
+
+function Histogram({
+  title,
+  bins,
+  samples,
+  medianMs,
+  p10Ms,
+  color,
+}: {
+  title: string;
+  bins: number[] | null;
+  samples: number;
+  medianMs: number;
+  p10Ms: number;
+  color: string;
+}) {
+  const data = bins && bins.length ? bins : [];
+  const max = Math.max(1, ...data);
+  const width = 240;
+  const height = 56;
+  const barW = width / 20;
+  const x = (msValue: number) => Math.min(width, (msValue / 1000) * width);
+  return (
+    <div className="rounded-lg border border-border bg-card p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+          <span className="size-2 rounded-full" style={{ background: color }} />
+          {title}
+        </span>
+        <span className="text-xs tabular-nums text-muted-foreground">
+          {samples ? <>median <span className="font-medium text-foreground">{Math.round(medianMs)} ms</span> · p10 {Math.round(p10Ms)} ms · n={samples}</> : 'no samples'}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height + 14}`} className="mt-2 w-full" role="img" aria-label={`${title} distribution`}>
+        <line x1="0" y1={height} x2={width} y2={height} stroke="var(--chart-grid)" strokeWidth="1" />
+        {data.map((count, i) => {
+          const h = count ? Math.max(2, (count / max) * (height - 6)) : 0;
+          return count ? (
+            <rect key={i} x={i * barW + 1} y={height - h} width={barW - 2} height={h} rx="1.5" fill={color}>
+              <title>{`${i * HIST_BIN_MS}–${(i + 1) * HIST_BIN_MS} ms · ${count} encounter${count === 1 ? '' : 's'}`}</title>
+            </rect>
+          ) : null;
+        })}
+        {samples ? (
+          <>
+            <line x1={x(p10Ms)} y1="2" x2={x(p10Ms)} y2={height} stroke="var(--muted-foreground)" strokeWidth="1" strokeDasharray="3 2" />
+            <line x1={x(medianMs)} y1="0" x2={x(medianMs)} y2={height} stroke="var(--foreground)" strokeWidth="1.5" />
+          </>
+        ) : null}
+        {[0, 250, 500, 750, 1000].map((tick) => (
+          <text key={tick} x={tick === 0 ? 1 : tick === 1000 ? width - 1 : x(tick)} y={height + 11} fontSize="8.5" fill="var(--muted-foreground)" textAnchor={tick === 0 ? 'start' : tick === 1000 ? 'end' : 'middle'}>
+            {tick}
+          </text>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function BarRow({ label, detail, value, color, reference }: { label: string; detail: string; value: number; color: string; reference?: number }) {
+  return (
+    <div className="grid grid-cols-[7rem_1fr_3rem] items-center gap-2 text-xs">
+      <span className="truncate text-foreground" title={label}>{label}</span>
+      <div className="relative h-2.5 overflow-hidden rounded-full bg-muted">
+        <div className="h-full rounded-full" style={{ width: `${Math.min(100, value * 100)}%`, background: color }} />
+        {reference !== undefined ? (
+          <div
+            className="absolute inset-y-0 w-px bg-foreground/60"
+            style={{ left: `${Math.min(100, reference * 100)}%` }}
+            title={`overall ${pct(reference)}`}
+          />
+        ) : null}
+      </div>
+      <span className="text-right tabular-nums text-muted-foreground" title={detail}>{pct(value)}</span>
+    </div>
+  );
+}
+
+function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWeapon[] }) {
   const rules = player.triggeredRules ?? [];
+  const topWeapons = weapons
+    .filter((weapon) => weapon.weaponName && weapon.shots >= 10)
+    .toSorted((a, b) => b.shots - a.shots)
+    .slice(0, 6);
+  const situational: { label: string; shots: number; rate: number }[] = [
+    { label: 'Moving', shots: player.movingShots, rate: player.movingHitRate },
+    { label: 'Flashed', shots: player.flashedShots, rate: player.flashedHitRate },
+    { label: 'Scoped', shots: player.scopedShots, rate: player.scopedHitRate },
+    { label: 'Airborne', shots: player.airborneShots, rate: player.airborneHitRate },
+  ].filter((row) => row.shots > 0);
   const stats: [string, string][] = [
     ['Crosshair @ exposure', `${player.crosshairMedianAngle.toFixed(1)}°`],
     ['First shot error', `${player.firstShotMedianAngle.toFixed(1)}°`],
     ['Unspotted damage', pct(player.unspottedDamageRate)],
     ['TTD p10', ms(player.ttdP10Ms, player.ttdSamples)],
     ['Reaction p10', ms(player.reactionP10Ms, player.reactionSamples)],
+    ['Smoke / wall kills', `${player.smokeKills} / ${player.wallKills}`],
   ];
   return (
-    <div className="space-y-4 border-l-2 border-primary/40 bg-muted/40 px-6 py-4">
-      <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-xs text-muted-foreground">Steam ID</span>
-          <a
-            href={`https://steamcommunity.com/profiles/${player.steamId}`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-sm font-medium text-foreground underline decoration-muted-foreground/40 underline-offset-2 hover:decoration-foreground"
-          >
-            {player.steamId}
-            <ExternalLink className="size-3" />
-          </a>
-        </div>
-        {stats.map(([label, value]) => (
-          <div key={label} className="flex flex-col gap-0.5">
-            <span className="text-xs text-muted-foreground">{label}</span>
-            <span className="text-sm font-medium">{value}</span>
-          </div>
-        ))}
+    <div className="space-y-3 border-l-2 border-primary/40 bg-muted/40 px-6 py-5">
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Histogram
+          title="Time to damage"
+          bins={player.ttdHistogram}
+          samples={player.ttdSamples}
+          medianMs={player.ttdWeightedMs}
+          p10Ms={player.ttdP10Ms}
+          color="var(--chart-1)"
+        />
+        <Histogram
+          title="Reaction time (first shot)"
+          bins={player.reactionHistogram}
+          samples={player.reactionSamples}
+          medianMs={player.reactionWeightedMs}
+          p10Ms={player.reactionP10Ms}
+          color="var(--chart-2)"
+        />
       </div>
-      <div className="flex flex-col gap-2">
-        <span className="text-xs text-muted-foreground">Triggered signals</span>
+
+      <div className="grid gap-3 lg:grid-cols-3">
+        <div className="space-y-2 rounded-lg border border-border bg-card p-3">
+          <span className="text-xs font-medium text-foreground">Accuracy by weapon</span>
+          {topWeapons.length ? (
+            <div className="space-y-1.5">
+              {topWeapons.map((weapon) => (
+                <BarRow
+                  key={weapon.weaponName}
+                  label={weapon.weaponName}
+                  detail={`${number.format(weapon.shots)} shots · ${weapon.kills} kills`}
+                  value={weapon.accuracy}
+                  color="var(--chart-1)"
+                  reference={player.accuracy}
+                />
+              ))}
+              <p className="text-[10px] text-muted-foreground">vertical mark = overall accuracy ({pct(player.accuracy)})</p>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Not enough weapon data.</p>
+          )}
+        </div>
+
+        <div className="space-y-2 rounded-lg border border-border bg-card p-3">
+          <span className="text-xs font-medium text-foreground">Situational accuracy</span>
+          {situational.length ? (
+            <div className="space-y-1.5">
+              {situational.map((row) => (
+                <BarRow
+                  key={row.label}
+                  label={row.label}
+                  detail={`${number.format(row.shots)} shots`}
+                  value={row.rate}
+                  color="var(--chart-2)"
+                  reference={player.accuracy}
+                />
+              ))}
+              <p className="text-[10px] text-muted-foreground">vertical mark = overall accuracy ({pct(player.accuracy)})</p>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No situational shots tracked.</p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 content-start gap-x-4 gap-y-3 rounded-lg border border-border bg-card p-3">
+          <div className="col-span-2 flex flex-col gap-0.5">
+            <span className="text-xs text-muted-foreground">Steam ID</span>
+            <a
+              href={`https://steamcommunity.com/profiles/${player.steamId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-sm font-medium text-foreground underline decoration-muted-foreground/40 underline-offset-2 hover:decoration-foreground"
+            >
+              {player.steamId}
+              <ExternalLink className="size-3" />
+            </a>
+          </div>
+          {stats.map(([label, value]) => (
+            <div key={label} className="flex flex-col gap-0.5">
+              <span className="text-xs text-muted-foreground">{label}</span>
+              <span className="text-sm font-medium tabular-nums">{value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+        <span className="text-xs font-medium text-foreground">Triggered signals</span>
         {rules.length ? (
           <div className="flex flex-wrap gap-2">
             {rules.map((rule) => (
-              <span key={rule.name} className="flex items-center gap-1.5 rounded-md bg-card px-2 py-1 text-xs">
+              <span key={rule.name} className="flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs">
                 {rule.name.replaceAll('_', ' ')}
-                <span className="text-destructive">+{rule.points}</span>
+                <span className="font-medium text-destructive">+{rule.points}</span>
                 <span className="text-muted-foreground">{rule.value.toFixed(2)} · n={rule.sample}</span>
               </span>
             ))}
@@ -222,9 +376,20 @@ const COLUMNS: { key: SortKey | null; label: string }[] = [
   { key: 'ttdWeightedMs', label: 'TTD' },
   { key: 'reactionWeightedMs', label: 'Reaction' },
   { key: 'suspicionScore', label: 'Status' },
+  { key: null, label: 'Actions' },
 ];
 
-function PlayerTable({ players, onToggleSaved }: { players: Player[]; onToggleSaved: (player: Player) => void }) {
+function PlayerTable({
+  players,
+  weapons,
+  onToggleSaved,
+  onToggleBanned,
+}: {
+  players: Player[];
+  weapons: PlayerWeapon[];
+  onToggleSaved: (player: Player) => void;
+  onToggleBanned: (player: Player) => void;
+}) {
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
   const [status, setStatus] = useState<StatusFilter>('all');
@@ -317,7 +482,7 @@ function PlayerTable({ players, onToggleSaved }: { players: Player[]; onToggleSa
               return (
                 <Fragment key={player.steamId}>
                   <TableRow
-                    className="cursor-pointer"
+                    className={cn('cursor-pointer', player.banned && 'bg-destructive/10 text-muted-foreground hover:bg-destructive/15')}
                     onClick={() => setExpanded((value) => (value === player.steamId ? null : player.steamId))}
                   >
                     <TableCell>
@@ -336,7 +501,10 @@ function PlayerTable({ players, onToggleSaved }: { players: Player[]; onToggleSa
                     <TableCell className="tabular-nums">{ms(player.ttdWeightedMs, player.ttdSamples)}</TableCell>
                     <TableCell className="tabular-nums">{ms(player.reactionWeightedMs, player.reactionSamples)}</TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1.5">
+                      <Badge variant={statusVariant(player.status)}>{STATUS_LABEL[player.status]}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
                         <button
                           className={cn('text-muted-foreground hover:text-foreground', player.saved && 'text-primary hover:text-primary')}
                           title={player.saved ? 'Unsave player' : 'Save player'}
@@ -344,14 +512,20 @@ function PlayerTable({ players, onToggleSaved }: { players: Player[]; onToggleSa
                         >
                           <Bookmark className={cn('size-4', player.saved && 'fill-current')} />
                         </button>
-                        <Badge variant={statusVariant(player.status)}>{STATUS_LABEL[player.status]}</Badge>
+                        <button
+                          className={cn('text-muted-foreground hover:text-destructive', player.banned && 'text-destructive')}
+                          title={player.banned ? 'Unmark as banned' : 'Mark as banned'}
+                          onClick={(event) => { event.stopPropagation(); onToggleBanned(player); }}
+                        >
+                          <Ban className="size-4" />
+                        </button>
                       </div>
                     </TableCell>
                   </TableRow>
                   {open ? (
                     <TableRow className="hover:bg-transparent">
                       <TableCell colSpan={COLUMNS.length} className="p-0">
-                        <PlayerDetails player={player} />
+                        <PlayerDetails player={player} weapons={weapons.filter((weapon) => weapon.steamId === player.steamId)} />
                       </TableCell>
                     </TableRow>
                   ) : null}
@@ -400,9 +574,22 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
   const [showAll, setShowAll] = useState(false);
   const enabledCount = demos.filter((demo) => demo.enabled).length;
 
-  const pageCount = Math.max(1, Math.ceil(demos.length / pageSize));
+  const sorted = useMemo(() => demos.toSorted((a, b) => (b.date || '').localeCompare(a.date || '')), [demos]);
+  const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
   const currentPage = Math.min(page, pageCount - 1);
-  const visible = showAll ? demos : demos.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+  const visible = showAll ? sorted : sorted.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+
+  const dayKey = (demo: Demo) => (demo.date ? demo.date.slice(0, 10) : 'unknown');
+  const dayGroups = useMemo(() => {
+    const groups = new Map<string, Demo[]>();
+    for (const demo of visible) {
+      const key = dayKey(demo);
+      const group = groups.get(key);
+      if (group) group.push(demo);
+      else groups.set(key, [demo]);
+    }
+    return [...groups.entries()];
+  }, [visible]);
 
   const report = (text: string, isError: boolean) => { setMessage(text); setFailed(isError); };
 
@@ -410,6 +597,18 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
     setPending(demo.checksum);
     try { await setDemoEnabled(demo.checksum, !demo.enabled); setMessage(''); onChanged(); }
     catch (cause) { report(cause instanceof Error ? cause.message : 'Toggle failed', true); }
+    finally { setPending(null); }
+  };
+
+  // Toggles every demo of the day (also the ones on other pages).
+  const toggleDay = async (key: string, target: boolean) => {
+    setPending(key);
+    try {
+      const changed = demos.filter((demo) => dayKey(demo) === key && demo.enabled !== target);
+      await Promise.all(changed.map((demo) => setDemoEnabled(demo.checksum, target)));
+      setMessage('');
+      onChanged();
+    } catch (cause) { report(cause instanceof Error ? cause.message : 'Toggle failed', true); }
     finally { setPending(null); }
   };
 
@@ -472,26 +671,52 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {visible.map((demo) => (
-                      <TableRow key={demo.checksum} className={cn(!demo.enabled && 'opacity-50')}>
-                        <TableCell>
-                          <input
-                            type="checkbox"
-                            className="size-4 accent-primary"
-                            checked={demo.enabled}
-                            disabled={pending === demo.checksum}
-                            onChange={() => void toggle(demo)}
-                          />
-                        </TableCell>
-                        <TableCell className="font-medium">{demo.fileName}</TableCell>
-                        <TableCell>{demo.mapName}</TableCell>
-                        <TableCell className="tabular-nums">{demo.date ? new Date(demo.date).toLocaleDateString() : '—'}</TableCell>
-                        <TableCell>{demo.source}</TableCell>
-                        <TableCell className="tabular-nums">{demo.players}</TableCell>
-                        <TableCell className="tabular-nums">{demo.rounds}</TableCell>
-                        <TableCell className="tabular-nums">{demo.importedAt ? new Date(demo.importedAt).toLocaleDateString() : '—'}</TableCell>
-                      </TableRow>
-                    ))}
+                    {dayGroups.map(([key, group]) => {
+                      const dayDemos = demos.filter((demo) => dayKey(demo) === key);
+                      const enabledInDay = dayDemos.filter((demo) => demo.enabled).length;
+                      const allEnabled = enabledInDay === dayDemos.length;
+                      return (
+                        <Fragment key={key}>
+                          <TableRow className="bg-muted/40 hover:bg-muted/40">
+                            <TableCell>
+                              <input
+                                type="checkbox"
+                                className="size-4 accent-primary"
+                                checked={allEnabled}
+                                ref={(el) => { if (el) el.indeterminate = enabledInDay > 0 && !allEnabled; }}
+                                disabled={pending === key}
+                                title={allEnabled ? 'Exclude the whole day' : 'Include the whole day'}
+                                onChange={() => void toggleDay(key, !allEnabled)}
+                              />
+                            </TableCell>
+                            <TableCell colSpan={7} className="text-xs font-medium text-muted-foreground">
+                              {key === 'unknown' ? 'Unknown date' : new Date(key).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                              {' · '}{enabledInDay}/{dayDemos.length} in stats
+                            </TableCell>
+                          </TableRow>
+                          {group.map((demo) => (
+                            <TableRow key={demo.checksum} className={cn(!demo.enabled && 'opacity-50')}>
+                              <TableCell>
+                                <input
+                                  type="checkbox"
+                                  className="size-4 accent-primary"
+                                  checked={demo.enabled}
+                                  disabled={pending === demo.checksum}
+                                  onChange={() => void toggle(demo)}
+                                />
+                              </TableCell>
+                              <TableCell className="font-medium">{demo.fileName}</TableCell>
+                              <TableCell>{demo.mapName}</TableCell>
+                              <TableCell className="tabular-nums">{demo.date ? new Date(demo.date).toLocaleDateString() : '—'}</TableCell>
+                              <TableCell>{demo.source}</TableCell>
+                              <TableCell className="tabular-nums">{demo.players}</TableCell>
+                              <TableCell className="tabular-nums">{demo.rounds}</TableCell>
+                              <TableCell className="tabular-nums">{demo.importedAt ? new Date(demo.importedAt).toLocaleDateString() : '—'}</TableCell>
+                            </TableRow>
+                          ))}
+                        </Fragment>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -626,6 +851,15 @@ export default function App() {
     catch { void loadAll(); }
   }, [loadAll]);
 
+  const toggleBanned = useCallback(async (player: Player) => {
+    setReport((current) => ({
+      ...current,
+      players: (current.players ?? []).map((p) => (p.steamId === player.steamId ? { ...p, banned: !player.banned } : p)),
+    }));
+    try { await setPlayerBanned(player.steamId, !player.banned); }
+    catch { void loadAll(); }
+  }, [loadAll]);
+
   useEffect(() => { void loadAll(); }, [loadAll]);
   useEffect(() => {
     const timer = window.setInterval(async () => {
@@ -663,7 +897,12 @@ export default function App() {
       {loading ? (
         <div className="py-20 text-center text-sm text-muted-foreground">Loading…</div>
       ) : (
-        <PlayerTable players={players} onToggleSaved={(player) => void toggleSaved(player)} />
+        <PlayerTable
+          players={players}
+          weapons={report.playersByWeapon ?? []}
+          onToggleSaved={(player) => void toggleSaved(player)}
+          onToggleBanned={(player) => void toggleBanned(player)}
+        />
       )}
       <CheatSheet open={guideOpen} onClose={() => setGuideOpen(false)} />
     </div>

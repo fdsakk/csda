@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 
@@ -65,6 +66,31 @@ type AnalyzeDemoOptions struct {
 	IncludePositions bool
 	Source           constants.DemoSource
 	statsCollector   *demoStatsCollector
+	// onProgress, when set, receives the parse progress as a 0..1 fraction of
+	// demo file bytes consumed.
+	onProgress func(float64)
+}
+
+// progressReader reports read progress against the file size. The parser
+// buffers ahead, so this slightly leads actual processing — close enough for a
+// progress bar.
+type progressReader struct {
+	inner      io.Reader
+	read       int64
+	size       int64
+	lastReport int64
+	onProgress func(float64)
+}
+
+func (r *progressReader) Read(p []byte) (int, error) {
+	n, err := r.inner.Read(p)
+	r.read += int64(n)
+	// Report in ~0.5% steps to keep callback overhead negligible.
+	if r.read-r.lastReport > r.size/200 {
+		r.lastReport = r.read
+		r.onProgress(min(1, float64(r.read)/float64(r.size)))
+	}
+	return n, err
 }
 
 func analyzeDemo(demoPath string, options AnalyzeDemoOptions) (*Match, error) {
@@ -93,7 +119,13 @@ func analyzeDemo(demoPath string, options AnalyzeDemoOptions) (*Match, error) {
 	parserConfig.NetMessageDecryptionKey = demo.NetMessageDecryptionPublicKey
 	parserConfig.DisableMimicSource1Events = demo.Type == constants.DemoTypePOV
 
-	parser := dem.NewParserWithConfig(file, parserConfig)
+	var reader io.Reader = file
+	if options.onProgress != nil {
+		if info, statErr := file.Stat(); statErr == nil && info.Size() > 0 {
+			reader = &progressReader{inner: file, size: info.Size(), onProgress: options.onProgress}
+		}
+	}
+	parser := dem.NewParserWithConfig(reader, parserConfig)
 	defer parser.Close()
 
 	_, err = parser.ParseHeader()
@@ -1001,6 +1033,15 @@ func (analyzer *Analyzer) registerCommonHandlers(includePositions bool) {
 		smokeStart := newSmokeStartFromGameEvent(analyzer, event)
 		if smokeStart != nil {
 			match.SmokesStart = append(match.SmokesStart, smokeStart)
+		}
+		if analyzer.playerStatsCollector != nil {
+			analyzer.playerStatsCollector.onSmokeStart(analyzer, event.GrenadeEntityID, event.Position)
+		}
+	})
+
+	parser.RegisterEventHandler(func(event events.SmokeExpired) {
+		if analyzer.playerStatsCollector != nil {
+			analyzer.playerStatsCollector.onSmokeExpired(event.GrenadeEntityID)
 		}
 	})
 

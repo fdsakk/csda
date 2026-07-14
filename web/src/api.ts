@@ -25,6 +25,17 @@ export type Player = {
   ttdMedianMs: number;
   ttdWeightedMs: number;
   ttdP10Ms: number;
+  /** 20 bins of 50ms across 0–1000ms */
+  ttdHistogram: number[] | null;
+  reactionHistogram: number[] | null;
+  movingShots: number;
+  movingHitRate: number;
+  airborneShots: number;
+  airborneHitRate: number;
+  flashedShots: number;
+  flashedHitRate: number;
+  scopedShots: number;
+  scopedHitRate: number;
   reactionSamples: number;
   reactionMedianMs: number;
   reactionWeightedMs: number;
@@ -32,6 +43,7 @@ export type Player = {
   crosshairMedianAngle: number;
   firstShotMedianAngle: number;
   saved: boolean;
+  banned: boolean;
   eligible: boolean;
   suspicionScore: number;
   status: 'normal' | 'watch' | 'review' | 'critical' | 'insufficient_sample';
@@ -54,9 +66,22 @@ export type Demo = {
   rounds: number;
 };
 
+export type PlayerWeapon = {
+  steamId: string;
+  name: string;
+  weaponName: string;
+  shots: number;
+  hitShots: number;
+  accuracy: number;
+  damageEvents: number;
+  headHitEvents: number;
+  headHitRate: number;
+  kills: number;
+};
+
 export type Report = {
   players: Player[] | null;
-  playersByWeapon: unknown[] | null;
+  playersByWeapon: PlayerWeapon[] | null;
   evidence: unknown[] | null;
   importedDemos: Demo[] | null;
 };
@@ -72,6 +97,8 @@ export type Job = {
   error?: string;
   processed: number;
   total: number;
+  /** overall job progress in percent, including partial demo parse progress */
+  progress: number;
 };
 
 async function readJSON<T>(response: Response): Promise<T> {
@@ -101,14 +128,22 @@ export async function setDemoEnabled(checksum: string, enabled: boolean): Promis
 }
 
 export async function setPlayerSaved(steamId: string, saved: boolean): Promise<void> {
+  return patchPlayer(steamId, { saved });
+}
+
+export async function setPlayerBanned(steamId: string, banned: boolean): Promise<void> {
+  return patchPlayer(steamId, { banned });
+}
+
+async function patchPlayer(steamId: string, body: { saved?: boolean; banned?: boolean }): Promise<void> {
   const response = await fetch(`/api/players/${encodeURIComponent(steamId)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ saved }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: undefined }));
-    throw new Error(body.error ?? `Request failed: ${response.status}`);
+    const payload = await response.json().catch(() => ({ error: undefined }));
+    throw new Error(payload.error ?? `Request failed: ${response.status}`);
   }
 }
 

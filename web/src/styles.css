@@ -27,6 +27,12 @@
   --destructive: oklch(0.577 0.245 27.325);
   --warning: oklch(0.75 0.15 75);
   --radius: 0.625rem;
+  /* chart marks (validated data-viz palette, light-surface steps) */
+  --chart-1: #2a78d6;
+  --chart-1-soft: #9ec5f4;
+  --chart-2: #1baf7a;
+  --chart-2-soft: #8fd9bd;
+  --chart-grid: #e1e0d9;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -48,6 +54,12 @@
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
     --warning: oklch(0.8 0.16 80);
+    /* same hues stepped for the dark surface */
+    --chart-1: #3987e5;
+    --chart-1-soft: #1c5cab;
+    --chart-2: #199e70;
+    --chart-2-soft: #0f6b4c;
+    --chart-grid: #2c2c2a;
   }
 }
 

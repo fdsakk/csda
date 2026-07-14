@@ -1,10 +1,12 @@
 package api
 
 import (
+	"fmt"
 	"math"
 	"sort"
 
 	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
+	"github.com/akiver/cs-demo-analyzer/pkg/vis"
 	"github.com/golang/geo/r3"
 	"github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/common"
 	"github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/events"
@@ -145,8 +147,26 @@ type DemoStats struct {
 	Weapons    map[uint64]map[string]*DemoWeaponStats `json:"weapons"`
 }
 
+type activeSmoke struct {
+	entityID   int
+	expireTick int
+	occluder   vis.Sphere
+}
+
+type visCacheEntry struct {
+	tick    int
+	visible bool
+}
+
 type demoStatsCollector struct {
 	confirmationTicks int
+	trisDir           string
+	visEngine         *vis.Engine
+	visLoadAttempted  bool
+	graceTicks        int
+	smokes            []activeSmoke
+	occluders         []vis.Sphere
+	visCache          map[encounterKey]visCacheEntry
 	frames            map[uint64]playerFrameState
 	encounters        map[encounterKey]*encounterState
 	shots             map[uint64][]*trackedShot
@@ -154,12 +174,14 @@ type demoStatsCollector struct {
 	result            DemoStats
 }
 
-func newDemoStatsCollector(confirmationTicks int) *demoStatsCollector {
+func newDemoStatsCollector(confirmationTicks int, trisDir string) *demoStatsCollector {
 	if confirmationTicks < 1 {
 		confirmationTicks = 3
 	}
 	return &demoStatsCollector{
 		confirmationTicks: confirmationTicks,
+		trisDir:           trisDir,
+		visCache:          make(map[encounterKey]visCacheEntry),
 		frames:            make(map[uint64]playerFrameState),
 		encounters:        make(map[encounterKey]*encounterState),
 		shots:             make(map[uint64][]*trackedShot),
@@ -263,7 +285,78 @@ func distanceMeters(a, b playerFrameState) float64 {
 	return math.Sqrt(d.X*d.X+d.Y*d.Y+d.Z*d.Z) * 0.01905
 }
 
+// Approximation of the CS2 volumetric smoke cloud used to block vision rays.
+const (
+	smokeRadius          = 155.0
+	smokeCenterZOffset   = 55.0
+	smokeLifetimeSeconds = 22.0
+)
+
+func (c *demoStatsCollector) onSmokeStart(analyzer *Analyzer, entityID int, position r3.Vector) {
+	lifetimeTicks := int(smokeLifetimeSeconds * analyzer.parser.TickRate())
+	c.smokes = append(c.smokes, activeSmoke{
+		entityID:   entityID,
+		expireTick: analyzer.currentTick() + lifetimeTicks,
+		occluder:   vis.Sphere{Center: position.Add(r3.Vector{Z: smokeCenterZOffset}), Radius: smokeRadius},
+	})
+}
+
+func (c *demoStatsCollector) onSmokeExpired(entityID int) {
+	for i, smoke := range c.smokes {
+		if smoke.entityID == entityID {
+			c.smokes = append(c.smokes[:i], c.smokes[i+1:]...)
+			return
+		}
+	}
+}
+
+// visible reports whether the attacker can see the target: at least one target
+// body point inside the attacker FOV with a line of sight clear of map
+// geometry and smokes. Falls back to the server spotted flag when no map
+// geometry is available.
+func (c *demoStatsCollector) visible(a, t playerFrameState, attacker, target *common.Player) bool {
+	if c.visEngine == nil {
+		return attacker.HasSpotted(target)
+	}
+	eye := eyePosition(a)
+	points := [3]r3.Vector{eyePosition(t), aimPoint(t), t.pos.Add(r3.Vector{Z: 12})}
+	for _, point := range points {
+		if vis.InFOV(eye, a.yaw, a.pitch, point) && c.visEngine.LineOfSight(eye, point, c.occluders) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *demoStatsCollector) onFrame(analyzer *Analyzer) {
+	if !c.visLoadAttempted {
+		c.visLoadAttempted = true
+		engine, err := vis.LoadEngine(c.trisDir, analyzer.match.MapName)
+		if err != nil {
+			fmt.Printf("player stats: no map geometry for %q (%v), falling back to spotted flag\n", analyzer.match.MapName, err)
+		} else {
+			c.visEngine = engine
+		}
+	}
+	if c.graceTicks == 0 {
+		// Tolerate up to ~0.5s of occlusion before an encounter resets.
+		c.graceTicks = max(3, int(analyzer.parser.TickRate()/2))
+	}
+	tick := analyzer.currentTick()
+	if len(c.smokes) > 0 {
+		remaining := c.smokes[:0]
+		for _, smoke := range c.smokes {
+			if smoke.expireTick > tick {
+				remaining = append(remaining, smoke)
+			}
+		}
+		c.smokes = remaining
+	}
+	c.occluders = c.occluders[:0]
+	for _, smoke := range c.smokes {
+		c.occluders = append(c.occluders, smoke.occluder)
+	}
+
 	players := analyzer.parser.GameState().Participants().Playing()
 	current := make(map[uint64]playerFrameState, len(players))
 	byID := make(map[uint64]*common.Player, len(players))
@@ -277,7 +370,6 @@ func (c *demoStatsCollector) onFrame(analyzer *Analyzer) {
 		c.player(p.SteamID64, p.Name)
 	}
 
-	tick := analyzer.currentTick()
 	for attackerID, attacker := range byID {
 		a := current[attackerID]
 		if !a.alive || a.flashed {
@@ -290,9 +382,19 @@ func (c *demoStatsCollector) onFrame(analyzer *Analyzer) {
 			}
 			key := encounterKey{attacker: attackerID, target: targetID}
 			state := c.encounters[key]
-			spotted := attacker.HasSpotted(target)
+			// Raycasts are the analysis hot spot; reuse each pair's result for
+			// one extra tick (~16ms error on encounter anchors, well below the
+			// 3-tick confirmation window).
+			spotted, cached := false, false
+			if entry, ok := c.visCache[key]; ok && tick-entry.tick < 2 {
+				spotted, cached = entry.visible, true
+			}
+			if !cached {
+				spotted = c.visible(a, t, attacker, target)
+				c.visCache[key] = visCacheEntry{tick: tick, visible: spotted}
+			}
 			if spotted {
-				if state == nil || state.unspottedTicks >= 3 {
+				if state == nil || state.unspottedTicks >= c.graceTicks {
 					state = &encounterState{firstTick: tick, firstShotTick: -1, firstAngle: angularError(a, t), distance: distanceMeters(a, t)}
 					c.encounters[key] = state
 				}
@@ -304,7 +406,7 @@ func (c *demoStatsCollector) onFrame(analyzer *Analyzer) {
 				}
 			} else if state != nil {
 				state.unspottedTicks++
-				if state.unspottedTicks >= 3 {
+				if state.unspottedTicks >= c.graceTicks {
 					delete(c.encounters, key)
 				}
 			}
