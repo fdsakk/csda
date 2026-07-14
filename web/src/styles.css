@@ -91,7 +91,12 @@
   * {
     border-color: var(--border);
   }
+  html {
+    /* Filtering the table must not collapse the page height. */
+    min-height: 100vh;
+  }
   body {
+    min-height: 100vh;
     background: var(--background);
     color: var(--foreground);
     font-family: var(--font-sans);

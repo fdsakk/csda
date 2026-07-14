@@ -1,5 +1,5 @@
 import { DragEvent, Fragment, type ReactNode, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Ban, BookOpen, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FileUp, Film, Search, Upload, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Ban, BookOpen, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FileUp, Film, ListFilter, Search, Upload, X } from 'lucide-react';
 import { Demo, getJobs, getReport, importStats, Job, Player, PlayerWeapon, Report, setDemoEnabled, setPlayerBanned, setPlayerSaved, uploadDemos } from './api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -364,6 +364,149 @@ function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWea
 
 const PAGE_SIZES = [12, 25, 50, 100];
 
+type TableFilters = {
+  status: StatusFilter;
+  savedOnly: boolean;
+  bannedOnly: boolean;
+  hideBanned: boolean;
+  minDemos: number;
+  minShots: number;
+  minAccuracy: number;
+  minHeadHit: number;
+  minHsKill: number;
+  maxTtdMs: number;
+  maxReactionMs: number;
+  minKd: number;
+};
+
+const DEFAULT_FILTERS: TableFilters = {
+  status: 'all',
+  savedOnly: false,
+  bannedOnly: false,
+  hideBanned: false,
+  minDemos: 0,
+  minShots: 0,
+  minAccuracy: 0,
+  minHeadHit: 0,
+  minHsKill: 0,
+  maxTtdMs: 0,
+  maxReactionMs: 0,
+  minKd: 0,
+};
+
+function countActiveFilters(filters: TableFilters) {
+  return (Object.keys(DEFAULT_FILTERS) as (keyof TableFilters)[]).filter((key) => filters[key] !== DEFAULT_FILTERS[key]).length;
+}
+
+function playerKd(player: Player) {
+  return player.deaths ? player.kills / player.deaths : player.kills;
+}
+
+function matchesFilters(player: Player, filters: TableFilters) {
+  if (filters.status !== 'all' && !(filters.status === 'flagged' ? FLAGGED.includes(player.status) : player.status === filters.status)) return false;
+  if (filters.savedOnly && !player.saved) return false;
+  if (filters.bannedOnly && !player.banned) return false;
+  if (filters.hideBanned && player.banned) return false;
+  if (player.demoCount < filters.minDemos) return false;
+  if (player.shots < filters.minShots) return false;
+  if (player.accuracy < filters.minAccuracy) return false;
+  if (player.headHitRate < filters.minHeadHit) return false;
+  if (player.headshotKillRate < filters.minHsKill) return false;
+  if (filters.maxTtdMs && !(player.ttdSamples && player.ttdWeightedMs <= filters.maxTtdMs)) return false;
+  if (filters.maxReactionMs && !(player.reactionSamples && player.reactionWeightedMs <= filters.maxReactionMs)) return false;
+  if (filters.minKd && playerKd(player) < filters.minKd) return false;
+  return true;
+}
+
+// Threshold select; 0 always means "any".
+function ThresholdSelect({
+  label,
+  value,
+  options,
+  format,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  options: number[];
+  format: (value: number) => string;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-xs text-muted-foreground">{label}</label>
+      <Select value={String(value)} onValueChange={(next) => onChange(Number(next))}>
+        <SelectTrigger className={cn('h-8 w-full', value !== 0 && 'border-primary/50')}><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="0">Any</SelectItem>
+          {options.map((option) => (
+            <SelectItem key={option} value={String(option)}>{format(option)}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: 'all', label: 'All statuses' },
+  { value: 'flagged', label: 'Flagged only' },
+  { value: 'critical', label: 'Critical' },
+  { value: 'review', label: 'Review' },
+  { value: 'watch', label: 'Watch' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'insufficient_sample', label: 'Low sample' },
+];
+
+function FilterCheckbox({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 text-sm">
+      <input type="checkbox" className="size-4 accent-primary" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      {label}
+    </label>
+  );
+}
+
+// Inline filter panel: plain selects in the page flow, so nothing floats,
+// flips or locks scrolling.
+function FiltersPanel({ filters, onChange }: { filters: TableFilters; onChange: (filters: TableFilters) => void }) {
+  const set = <K extends keyof TableFilters>(key: K, value: TableFilters[K]) => onChange({ ...filters, [key]: value });
+  const active = countActiveFilters(filters);
+  return (
+    <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4">
+      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">Status</label>
+          <Select value={filters.status} onValueChange={(value) => set('status', value as StatusFilter)}>
+            <SelectTrigger className={cn('h-8 w-full', filters.status !== 'all' && 'border-primary/50')}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <ThresholdSelect label="Min demos" value={filters.minDemos} options={[2, 3, 5, 10]} format={(v) => `${v}+`} onChange={(v) => set('minDemos', v)} />
+        <ThresholdSelect label="Min shots" value={filters.minShots} options={[100, 500, 1000, 3000]} format={(v) => `${number.format(v)}+`} onChange={(v) => set('minShots', v)} />
+        <ThresholdSelect label="Accuracy" value={filters.minAccuracy} options={[0.15, 0.2, 0.25, 0.3]} format={(v) => `≥ ${Math.round(v * 100)}%`} onChange={(v) => set('minAccuracy', v)} />
+        <ThresholdSelect label="Head hit rate" value={filters.minHeadHit} options={[0.2, 0.3, 0.4, 0.5]} format={(v) => `≥ ${Math.round(v * 100)}%`} onChange={(v) => set('minHeadHit', v)} />
+        <ThresholdSelect label="HS kill rate" value={filters.minHsKill} options={[0.4, 0.6, 0.8]} format={(v) => `≥ ${Math.round(v * 100)}%`} onChange={(v) => set('minHsKill', v)} />
+        <ThresholdSelect label="TTD" value={filters.maxTtdMs} options={[450, 400, 350, 300]} format={(v) => `≤ ${v} ms`} onChange={(v) => set('maxTtdMs', v)} />
+        <ThresholdSelect label="Reaction time" value={filters.maxReactionMs} options={[350, 300, 250, 200]} format={(v) => `≤ ${v} ms`} onChange={(v) => set('maxReactionMs', v)} />
+        <ThresholdSelect label="K/D" value={filters.minKd} options={[1, 1.5, 2, 3]} format={(v) => `≥ ${v}`} onChange={(v) => set('minKd', v)} />
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-4">
+          <FilterCheckbox label="Saved only" checked={filters.savedOnly} onChange={(value) => set('savedOnly', value)} />
+          <FilterCheckbox label="Banned only" checked={filters.bannedOnly} onChange={(value) => set('bannedOnly', value)} />
+          <FilterCheckbox label="Hide banned" checked={filters.hideBanned} onChange={(value) => set('hideBanned', value)} />
+        </div>
+        <Button variant="ghost" size="sm" disabled={!active} onClick={() => onChange(DEFAULT_FILTERS)}>Reset filters</Button>
+      </div>
+    </div>
+  );
+}
+
 const COLUMNS: { key: SortKey | null; label: string }[] = [
   { key: 'name', label: 'Player' },
   { key: 'demoCount', label: 'Demos' },
@@ -392,7 +535,8 @@ function PlayerTable({
 }) {
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
-  const [status, setStatus] = useState<StatusFilter>('all');
+  const [filters, setFilters] = useState<TableFilters>(DEFAULT_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [pageSize, setPageSize] = useState(12);
   const [sortKey, setSortKey] = useState<SortKey>('suspicionScore');
   const [ascending, setAscending] = useState(false);
@@ -403,8 +547,7 @@ function PlayerTable({
   const shown = useMemo(() => {
     return players.filter((player) => {
       const matchesText = !deferredQuery || player.name.toLowerCase().includes(deferredQuery) || String(player.steamId).includes(deferredQuery);
-      const matchesStatus = status === 'all' || (status === 'flagged' ? FLAGGED.includes(player.status) : player.status === status);
-      return matchesText && matchesStatus;
+      return matchesText && matchesFilters(player, filters);
     }).toSorted((a, b) => {
       // saved players pin to the top only under the default (status) sort
       if (sortKey === 'suspicionScore' && a.saved !== b.saved) return a.saved ? -1 : 1;
@@ -412,17 +555,17 @@ function PlayerTable({
       const order = typeof av === 'string' ? av.localeCompare(String(bv)) : Number(av) - Number(bv);
       return ascending ? order : -order;
     });
-  }, [players, deferredQuery, status, sortKey, ascending]);
+  }, [players, deferredQuery, filters, sortKey, ascending]);
 
   const sort = (key: SortKey) => {
     if (sortKey === key) setAscending((value) => !value);
     else { setSortKey(key); setAscending(key === 'name'); }
   };
 
-  useEffect(() => { setPage(0); }, [deferredQuery, status, sortKey, ascending, pageSize]);
+  useEffect(() => { setPage(0); }, [deferredQuery, filters, sortKey, ascending, pageSize]);
 
-  const hasFilters = query || status !== 'all';
-  const reset = () => { setQuery(''); setStatus('all'); setPage(0); };
+  const hasFilters = Boolean(query) || countActiveFilters(filters) > 0;
+  const reset = () => { setQuery(''); setFilters(DEFAULT_FILTERS); setPage(0); };
 
   const pageCount = Math.max(1, Math.ceil(shown.length / pageSize));
   const currentPage = Math.min(page, pageCount - 1);
@@ -435,18 +578,11 @@ function PlayerTable({
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name or Steam ID" className="pl-9" />
         </div>
-        <Select value={status} onValueChange={(value) => setStatus(value as StatusFilter)}>
-          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
-            <SelectItem value="flagged">Flagged only</SelectItem>
-            <SelectItem value="critical">Critical</SelectItem>
-            <SelectItem value="review">Review</SelectItem>
-            <SelectItem value="watch">Watch</SelectItem>
-            <SelectItem value="normal">Normal</SelectItem>
-            <SelectItem value="insufficient_sample">Low sample</SelectItem>
-          </SelectContent>
-        </Select>
+        <Button variant="outline" className={cn(filtersOpen && 'bg-accent')} onClick={() => setFiltersOpen((value) => !value)}>
+          <ListFilter data-icon="inline-start" />
+          Filters
+          <Badge variant="outline" className={cn(!countActiveFilters(filters) && 'invisible')}>{countActiveFilters(filters)}</Badge>
+        </Button>
         <Select value={String(pageSize)} onValueChange={(value) => { setPageSize(Number(value)); setShowAll(false); }}>
           <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -455,10 +591,11 @@ function PlayerTable({
             ))}
           </SelectContent>
         </Select>
-        {hasFilters ? <Button variant="ghost" size="sm" onClick={reset}>Clear</Button> : null}
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-border">
+      {filtersOpen ? <FiltersPanel filters={filters} onChange={setFilters} /> : null}
+
+      <div className="min-h-[580px] overflow-x-auto rounded-lg border border-border">
         <Table className="min-w-[1100px]">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
@@ -629,7 +766,7 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
           </Button>
         }
       />
-      <DialogContent className="max-w-6xl px-16 py-12">
+      <DialogContent className="max-w-7xl px-16 py-12">
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -877,7 +1014,7 @@ export default function App() {
   const players = report.players ?? [];
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6 px-4 py-8 sm:px-6 sm:py-10">
+    <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-6 sm:py-10">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">CS2 demo analysis</h1>
