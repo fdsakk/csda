@@ -74,10 +74,17 @@ func TestStoreAndAggregateMultipleDemosBySteamID(t *testing.T) {
 		match := &Match{Checksum: string(rune('a' + index)), DemoFilePath: "demo.dem", DemoFileName: "demo", MapName: "de_test", Date: time.Unix(int64(index), 0), TickRate: 64, BuildNumber: 1, Source: constants.DemoSourceValve}
 		stats := DemoStats{
 			Players: map[uint64]*DemoPlayerStats{steamID: {SteamID64: steamID, Name: name, Rounds: 12, Shots: 40, HitShots: 20, DamageEvents: 20, HeadHitEvents: 10, Kills: 15, Deaths: 9, FirstBulletEncounters: 20, FirstBulletHeadHits: 5, TTDSamples: 20, TTDSumMS: 3000}},
-			Weapons: map[uint64]map[string]*DemoWeaponStats{steamID: {"AK-47": {SteamID64: steamID, WeaponName: "AK-47", Shots: 40, HitShots: 20, DamageEvents: 20, HeadHitEvents: 10}}},
+			Weapons: map[uint64]map[string]*DemoWeaponStats{steamID: {
+				"AK-47": {SteamID64: steamID, WeaponName: "AK-47", Shots: 30, HitShots: 15, DamageEvents: 15, HeadHitEvents: 10, Kills: 10},
+				"AWP":   {SteamID64: steamID, WeaponName: "AWP", Shots: 10, HitShots: 5, DamageEvents: 5, Kills: 5},
+			}},
 		}
 		for n := 0; n < 20; n++ {
-			stats.Encounters = append(stats.Encounters, DemoEncounter{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 150, TTDConfirmedMS: 120, ReactionTimeMS: 100, ConfirmedAngle: 3, FirstShotAngle: 1})
+			weapon, ttd := "AK-47", 200.0
+			if n < 5 {
+				weapon, ttd = "AWP", 100
+			}
+			stats.Encounters = append(stats.Encounters, DemoEncounter{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: ttd, TTDConfirmedMS: 120, ReactionTimeMS: 100, ConfirmedAngle: 3, FirstShotAngle: 1, WeaponName: weapon})
 			stats.Reactions = append(stats.Reactions, DemoReaction{AttackerSteamID64: steamID, VictimSteamID64: 2, ReactionTimeMS: 100})
 		}
 		stats.Encounters = append(stats.Encounters, DemoEncounter{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 1500, ReactionTimeMS: 1500})
@@ -99,13 +106,16 @@ func TestStoreAndAggregateMultipleDemosBySteamID(t *testing.T) {
 	if row.DemoCount != 3 || row.Shots != 120 || row.Kills != 45 || row.Deaths != 27 {
 		t.Fatalf("bad aggregate: %+v", row)
 	}
-	if row.TTDWeightedMS != 150 || row.TTDSamples != 60 || row.ReactionWeightedMS != 100 || row.ReactionSamples != 60 || !row.Eligible {
+	if row.TTDWeightedMS != 200 || row.TTDSamples != 60 || row.ReactionWeightedMS != 100 || row.ReactionSamples != 60 || !row.Eligible {
 		t.Fatalf("bad TTD/reaction/eligibility: %+v", row)
+	}
+	if !row.IsAWPer || row.AWPKills != 15 || math.Abs(row.AWPKillRate-1.0/3.0) > .001 || row.AWPTTDMedianMS != 100 || row.NonAWPTTDMedianMS != 200 {
+		t.Fatalf("bad AWP role/TTD split: %+v", row)
 	}
 	if len(row.Names) != 2 {
 		t.Fatalf("aliases = %#v, want two", row.Names)
 	}
-	if len(report.Weapons) != 1 || report.Weapons[0].Shots != 120 {
+	if len(report.Weapons) != 2 {
 		t.Fatalf("bad weapon aggregate: %+v", report.Weapons)
 	}
 }

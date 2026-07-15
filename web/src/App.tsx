@@ -221,10 +221,9 @@ function BarRow({ label, detail, value, color, reference }: { label: string; det
 
 function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWeapon[] }) {
   const rules = player.triggeredRules ?? [];
-  const topWeapons = weapons
-    .filter((weapon) => weapon.weaponName && weapon.shots >= 10)
-    .toSorted((a, b) => b.shots - a.shots)
-    .slice(0, 6);
+  const killWeapons = weapons
+    .filter((weapon) => weapon.weaponName && weapon.kills > 0)
+    .toSorted((a, b) => b.kills - a.kills);
   const situational: { label: string; shots: number; rate: number }[] = [
     { label: 'Moving', shots: player.movingShots, rate: player.movingHitRate },
     { label: 'Flashed', shots: player.flashedShots, rate: player.flashedHitRate },
@@ -236,6 +235,8 @@ function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWea
     ['First shot error', `${player.firstShotMedianAngle.toFixed(1)}°`],
     ['Unspotted damage', pct(player.unspottedDamageRate)],
     ['TTD p10', ms(player.ttdP10Ms, player.ttdSamples)],
+    ['TTD with AWP', ms(player.awpTtdMedianMs, player.awpTtdSamples)],
+    ['TTD without AWP', ms(player.nonAwpTtdMedianMs, player.nonAwpTtdSamples)],
     ['Reaction p10', ms(player.reactionP10Ms, player.reactionSamples)],
     ['Smoke / wall kills', `${player.smokeKills} / ${player.wallKills}`],
   ];
@@ -262,23 +263,21 @@ function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWea
 
       <div className="grid gap-3 lg:grid-cols-3">
         <div className="space-y-2 rounded-lg border border-border bg-card p-3">
-          <span className="text-xs font-medium text-foreground">Accuracy by weapon</span>
-          {topWeapons.length ? (
+          <span className="text-xs font-medium text-foreground">Kills by weapon</span>
+          {killWeapons.length ? (
             <div className="space-y-1.5">
-              {topWeapons.map((weapon) => (
+              {killWeapons.map((weapon) => (
                 <BarRow
                   key={weapon.weaponName}
                   label={weapon.weaponName}
-                  detail={`${number.format(weapon.shots)} shots · ${weapon.kills} kills`}
-                  value={weapon.accuracy}
+                  detail={`${weapon.kills} kills · ${pct(weapon.kills / player.kills)} of all kills`}
+                  value={weapon.kills / player.kills}
                   color="var(--chart-1)"
-                  reference={player.accuracy}
                 />
               ))}
-              <p className="text-[10px] text-muted-foreground">vertical mark = overall accuracy ({pct(player.accuracy)})</p>
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">Not enough weapon data.</p>
+            <p className="text-sm text-muted-foreground">No weapon kill data.</p>
           )}
         </div>
 
@@ -608,6 +607,9 @@ function PlayerTable({
                     <TableCell>
                       <div className="flex items-center gap-1.5 font-medium">
                         {player.name}
+                        {player.isAwper ? (
+                          <Badge variant="outline" title={`${player.awpKills} AWP kills (${pct(player.awpKillRate)} of all kills)`}>AWPer</Badge>
+                        ) : null}
                         <ChevronDown className={cn('size-3.5 text-muted-foreground transition-transform', open && 'rotate-180')} />
                       </div>
                     </TableCell>
@@ -921,6 +923,7 @@ function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 
           <GuideSection title="Exposure and response">
             <GuideItem term="TTD">Time from first spotted tick to first damage. The table shows a round-weighted median; `p10` in details is the fast 10% tail. Repeated low TTD is more relevant than one fast duel.</GuideItem>
+            <GuideItem term="AWPer">Players with at least 5 AWP kills and at least 25% of all kills made with the AWP. Their details split AWP TTD from non-AWP TTD for a fairer comparison with riflers.</GuideItem>
             <GuideItem term="Reaction">Time from first spotted tick to first shot. It is a demo-derived estimate, not a laboratory reaction-time test; pre-aim, sound cues and prediction affect it.</GuideItem>
             <GuideItem term="Crosshair @ exposure">Median angular distance from crosshair to opponent at confirmed exposure. Lower means stronger crosshair placement, not cheating by itself.</GuideItem>
             <GuideItem term="First shot error">Median angular distance at the first shot. Read it together with TTD and reaction instead of treating it as a standalone verdict.</GuideItem>

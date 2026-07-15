@@ -25,6 +25,13 @@ export type Player = {
   ttdMedianMs: number;
   ttdWeightedMs: number;
   ttdP10Ms: number;
+  awpKills: number;
+  awpKillRate: number;
+  isAwper: boolean;
+  awpTtdSamples: number;
+  awpTtdMedianMs: number;
+  nonAwpTtdSamples: number;
+  nonAwpTtdMedianMs: number;
   /** 20 bins of 50ms across 0–1000ms */
   ttdHistogram: number[] | null;
   reactionHistogram: number[] | null;

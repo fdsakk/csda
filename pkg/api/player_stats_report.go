@@ -23,59 +23,66 @@ type PlayerSuspicionRule struct {
 }
 
 type PlayerStatsReportRow struct {
-	SteamID64             uint64                `json:"steamId"`
-	Name                  string                `json:"name"`
-	Names                 []string              `json:"names"`
-	DemoCount             int                   `json:"demoCount"`
-	Rounds                int                   `json:"rounds"`
-	Shots                 int                   `json:"shots"`
-	HitShots              int                   `json:"hitShots"`
-	Accuracy              float64               `json:"accuracy"`
-	DamageEvents          int                   `json:"damageEvents"`
-	HeadHitEvents         int                   `json:"headHitEvents"`
-	HeadHitRate           float64               `json:"headHitRate"`
-	Kills                 int                   `json:"kills"`
-	Deaths                int                   `json:"deaths"`
-	HeadshotKills         int                   `json:"headshotKills"`
-	HeadshotKillRate      float64               `json:"headshotKillRate"`
-	SmokeKills            int                   `json:"smokeKills"`
-	WallKills             int                   `json:"wallKills"`
-	UnspottedDamageEvents int                   `json:"unspottedDamageEvents"`
-	UnspottedDamageRate   float64               `json:"unspottedDamageRate"`
-	FirstBulletEncounters int                   `json:"firstBulletEncounters"`
-	FirstBulletHeadHits   int                   `json:"firstBulletHeadHits"`
-	FirstBulletHeadRate   float64               `json:"firstBulletHeadRate"`
-	SnapEvents            int                   `json:"snapEvents"`
-	SnapRate              float64               `json:"snapRate"`
-	TTDSamples            int                   `json:"ttdSamples"`
-	TTDMeanMS             float64               `json:"ttdMeanMs"`
-	TTDMedianMS           float64               `json:"ttdMedianMs"`
-	TTDWeightedMS         float64               `json:"ttdWeightedMs"`
-	TTDP10MS              float64               `json:"ttdP10Ms"`
-	TTDUnder190Rate       float64               `json:"ttdUnder190Rate"`
+	SteamID64             uint64   `json:"steamId"`
+	Name                  string   `json:"name"`
+	Names                 []string `json:"names"`
+	DemoCount             int      `json:"demoCount"`
+	Rounds                int      `json:"rounds"`
+	Shots                 int      `json:"shots"`
+	HitShots              int      `json:"hitShots"`
+	Accuracy              float64  `json:"accuracy"`
+	DamageEvents          int      `json:"damageEvents"`
+	HeadHitEvents         int      `json:"headHitEvents"`
+	HeadHitRate           float64  `json:"headHitRate"`
+	Kills                 int      `json:"kills"`
+	Deaths                int      `json:"deaths"`
+	HeadshotKills         int      `json:"headshotKills"`
+	HeadshotKillRate      float64  `json:"headshotKillRate"`
+	SmokeKills            int      `json:"smokeKills"`
+	WallKills             int      `json:"wallKills"`
+	UnspottedDamageEvents int      `json:"unspottedDamageEvents"`
+	UnspottedDamageRate   float64  `json:"unspottedDamageRate"`
+	FirstBulletEncounters int      `json:"firstBulletEncounters"`
+	FirstBulletHeadHits   int      `json:"firstBulletHeadHits"`
+	FirstBulletHeadRate   float64  `json:"firstBulletHeadRate"`
+	SnapEvents            int      `json:"snapEvents"`
+	SnapRate              float64  `json:"snapRate"`
+	TTDSamples            int      `json:"ttdSamples"`
+	TTDMeanMS             float64  `json:"ttdMeanMs"`
+	TTDMedianMS           float64  `json:"ttdMedianMs"`
+	TTDWeightedMS         float64  `json:"ttdWeightedMs"`
+	TTDP10MS              float64  `json:"ttdP10Ms"`
+	TTDUnder190Rate       float64  `json:"ttdUnder190Rate"`
+	AWPKills              int      `json:"awpKills"`
+	AWPKillRate           float64  `json:"awpKillRate"`
+	IsAWPer               bool     `json:"isAwper"`
+	AWPTTDSamples         int      `json:"awpTtdSamples"`
+	AWPTTDMedianMS        float64  `json:"awpTtdMedianMs"`
+	NonAWPTTDSamples      int      `json:"nonAwpTtdSamples"`
+	NonAWPTTDMedianMS     float64  `json:"nonAwpTtdMedianMs"`
 	// 20 bins of 50ms across 0–1000ms, for the UI distribution charts.
-	TTDHistogram      []int                 `json:"ttdHistogram"`
-	ReactionHistogram []int                 `json:"reactionHistogram"`
-	ReactionSamples   int                   `json:"reactionSamples"`
-	ReactionMedianMS      float64               `json:"reactionMedianMs"`
-	ReactionWeightedMS    float64               `json:"reactionWeightedMs"`
-	ReactionP10MS         float64               `json:"reactionP10Ms"`
-	CrosshairMedianAngle  float64               `json:"crosshairMedianAngle"`
-	FirstShotMedianAngle  float64               `json:"firstShotMedianAngle"`
-	MovingShots           int                   `json:"movingShots"`
-	MovingHitRate         float64               `json:"movingHitRate"`
-	AirborneShots         int                   `json:"airborneShots"`
-	AirborneHitRate       float64               `json:"airborneHitRate"`
-	FlashedShots          int                   `json:"flashedShots"`
-	FlashedHitRate        float64               `json:"flashedHitRate"`
-	ScopedShots           int                   `json:"scopedShots"`
-	ScopedHitRate         float64               `json:"scopedHitRate"`
-	Saved                 bool                  `json:"saved"`
-	Banned                bool                  `json:"banned"`
-	Eligible              bool                  `json:"eligible"`
-	SuspicionScore        int                   `json:"suspicionScore"`
-	Status                string                `json:"status"`
-	TriggeredRules        []PlayerSuspicionRule `json:"triggeredRules"`
+	TTDHistogram         []int                 `json:"ttdHistogram"`
+	ReactionHistogram    []int                 `json:"reactionHistogram"`
+	ReactionSamples      int                   `json:"reactionSamples"`
+	ReactionMedianMS     float64               `json:"reactionMedianMs"`
+	ReactionWeightedMS   float64               `json:"reactionWeightedMs"`
+	ReactionP10MS        float64               `json:"reactionP10Ms"`
+	CrosshairMedianAngle float64               `json:"crosshairMedianAngle"`
+	FirstShotMedianAngle float64               `json:"firstShotMedianAngle"`
+	MovingShots          int                   `json:"movingShots"`
+	MovingHitRate        float64               `json:"movingHitRate"`
+	AirborneShots        int                   `json:"airborneShots"`
+	AirborneHitRate      float64               `json:"airborneHitRate"`
+	FlashedShots         int                   `json:"flashedShots"`
+	FlashedHitRate       float64               `json:"flashedHitRate"`
+	ScopedShots          int                   `json:"scopedShots"`
+	ScopedHitRate        float64               `json:"scopedHitRate"`
+	Saved                bool                  `json:"saved"`
+	Banned               bool                  `json:"banned"`
+	Eligible             bool                  `json:"eligible"`
+	SuspicionScore       int                   `json:"suspicionScore"`
+	Status               string                `json:"status"`
+	TriggeredRules       []PlayerSuspicionRule `json:"triggeredRules"`
 }
 
 func (row PlayerStatsReportRow) MarshalJSON() ([]byte, error) {
@@ -299,12 +306,13 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 	}
 	for index := range report.Players {
 		row := &report.Players[index]
-		ttdRows, qerr := db.QueryContext(ctx, `SELECT e.demo_id,s.rounds,e.ttd_ms,e.reaction_time_ms,e.confirmed_angle,e.first_shot_angle FROM encounters e JOIN player_demo_stats s ON s.demo_id=e.demo_id AND s.steam_id=e.attacker_steam_id JOIN demos d ON d.id=e.demo_id AND d.enabled=1 WHERE e.attacker_steam_id=? ORDER BY e.ttd_ms`, row.SteamID64)
+		ttdRows, qerr := db.QueryContext(ctx, `SELECT e.demo_id,s.rounds,e.ttd_ms,e.reaction_time_ms,e.confirmed_angle,e.first_shot_angle,e.weapon_name FROM encounters e JOIN player_demo_stats s ON s.demo_id=e.demo_id AND s.steam_id=e.attacker_steam_id JOIN demos d ON d.id=e.demo_id AND d.enabled=1 WHERE e.attacker_steam_id=? ORDER BY e.ttd_ms`, row.SteamID64)
 		if qerr != nil {
 			return nil, qerr
 		}
 		var ttdSamples []float64
 		var reactionSamples []float64
+		var awpTTDSamples, nonAWPTTDSamples []float64
 		var crosshairAngles, firstShotAngles []float64
 		ttdByDemo := make(map[int64]*demoSamples)
 		reactionByDemo := make(map[int64]*demoSamples)
@@ -314,7 +322,8 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 			var rounds int
 			var value, reaction float64
 			var crosshairAngle, firstShotAngle float64
-			if err := ttdRows.Scan(&demoID, &rounds, &value, &reaction, &crosshairAngle, &firstShotAngle); err != nil {
+			var weaponName string
+			if err := ttdRows.Scan(&demoID, &rounds, &value, &reaction, &crosshairAngle, &firstShotAngle, &weaponName); err != nil {
 				ttdRows.Close()
 				return nil, err
 			}
@@ -332,6 +341,11 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 				}
 				if value <= 190 {
 					under190++
+				}
+				if weaponName == constants.WeaponAWP.String() {
+					awpTTDSamples = append(awpTTDSamples, value)
+				} else {
+					nonAWPTTDSamples = append(nonAWPTTDSamples, value)
 				}
 			}
 			// reaction_time_ms is -1 on rows stored before the column existed
@@ -353,6 +367,10 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 		row.TTDWeightedMS = roundWeightedDemoMedian(ttdByDemo)
 		row.TTDP10MS = percentile(ttdSamples, .1)
 		row.TTDUnder190Rate = ratio(under190, len(ttdSamples))
+		row.AWPTTDSamples = len(awpTTDSamples)
+		row.AWPTTDMedianMS = percentile(awpTTDSamples, .5)
+		row.NonAWPTTDSamples = len(nonAWPTTDSamples)
+		row.NonAWPTTDMedianMS = percentile(nonAWPTTDSamples, .5)
 		for _, value := range ttdSamples {
 			row.TTDMeanMS += value
 		}
@@ -388,8 +406,21 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 		w.Accuracy = ratio(w.HitShots, w.Shots)
 		w.HeadHitRate = ratio(w.HeadHitEvents, w.DamageEvents)
 		report.Weapons = append(report.Weapons, w)
+		if w.WeaponName == constants.WeaponAWP.String() {
+			for index := range report.Players {
+				if report.Players[index].SteamID64 == w.SteamID64 {
+					report.Players[index].AWPKills = w.Kills
+					break
+				}
+			}
+		}
 	}
 	weaponRows.Close()
+	for index := range report.Players {
+		row := &report.Players[index]
+		row.AWPKillRate = ratio(row.AWPKills, row.Kills)
+		row.IsAWPer = row.AWPKills >= 5 && row.AWPKillRate >= .25
+	}
 
 	evidenceRows, err := db.QueryContext(ctx, `SELECT d.checksum,d.path,e.round_number,e.tick,e.steam_id,p.latest_name,e.victim_steam_id,e.kind,e.value,e.details FROM evidence e JOIN demos d ON d.id=e.demo_id LEFT JOIN players p ON p.steam_id=e.steam_id WHERE d.enabled=1 ORDER BY e.steam_id,d.demo_date,e.round_number,e.tick`)
 	if err != nil {
