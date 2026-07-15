@@ -203,7 +203,7 @@ function Histogram({
 function BarRow({ label, detail, value, color, reference }: { label: string; detail: string; value: number; color: string; reference?: number }) {
   return (
     <div className="grid grid-cols-[7rem_1fr_3rem] items-center gap-2 text-xs">
-      <span className="truncate text-foreground" title={label}>{label}</span>
+      <span className="truncate text-[13px] text-foreground" title={label}>{label}</span>
       <div className="relative h-2.5 overflow-hidden rounded-full bg-muted">
         <div className="h-full rounded-full" style={{ width: `${Math.min(100, value * 100)}%`, background: color }} />
         {reference !== undefined ? (
@@ -221,10 +221,13 @@ function BarRow({ label, detail, value, color, reference }: { label: string; det
 
 function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWeapon[] }) {
   const rules = player.triggeredRules ?? [];
-  const topWeapons = weapons
+  const accuracyWeapons = weapons
     .filter((weapon) => weapon.weaponName && weapon.shots >= 10)
     .toSorted((a, b) => b.shots - a.shots)
     .slice(0, 6);
+  const killWeapons = weapons
+    .filter((weapon) => weapon.weaponName && weapon.kills > 0)
+    .toSorted((a, b) => b.kills - a.kills);
   const situational: { label: string; shots: number; rate: number }[] = [
     { label: 'Moving', shots: player.movingShots, rate: player.movingHitRate },
     { label: 'Flashed', shots: player.flashedShots, rate: player.flashedHitRate },
@@ -236,6 +239,8 @@ function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWea
     ['First shot error', `${player.firstShotMedianAngle.toFixed(1)}°`],
     ['Unspotted damage', pct(player.unspottedDamageRate)],
     ['TTD p10', ms(player.ttdP10Ms, player.ttdSamples)],
+    ['TTD with AWP', ms(player.awpTtdMedianMs, player.awpTtdSamples)],
+    ['TTD without AWP', ms(player.nonAwpTtdMedianMs, player.nonAwpTtdSamples)],
     ['Reaction p10', ms(player.reactionP10Ms, player.reactionSamples)],
     ['Smoke / wall kills', `${player.smokeKills} / ${player.wallKills}`],
   ];
@@ -262,16 +267,35 @@ function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWea
 
       <div className="grid gap-3 lg:grid-cols-3">
         <div className="space-y-2 rounded-lg border border-border bg-card p-3">
-          <span className="text-xs font-medium text-foreground">Accuracy by weapon</span>
-          {topWeapons.length ? (
+          <span className="mb-3 block text-xs font-medium text-foreground">Kills by weapon</span>
+          {killWeapons.length ? (
             <div className="space-y-1.5">
-              {topWeapons.map((weapon) => (
+              {killWeapons.map((weapon) => (
+                <BarRow
+                  key={weapon.weaponName}
+                  label={weapon.weaponName}
+                  detail={`${weapon.kills} kills · ${pct(weapon.kills / player.kills)} of all kills`}
+                  value={weapon.kills / player.kills}
+                  color="var(--chart-1)"
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No weapon kill data.</p>
+          )}
+        </div>
+
+        <div className="space-y-2 rounded-lg border border-border bg-card p-3">
+          <span className="mb-3 block text-xs font-medium text-foreground">Accuracy</span>
+          {accuracyWeapons.length ? (
+            <div className="space-y-1.5">
+              {accuracyWeapons.map((weapon) => (
                 <BarRow
                   key={weapon.weaponName}
                   label={weapon.weaponName}
                   detail={`${number.format(weapon.shots)} shots · ${weapon.kills} kills`}
                   value={weapon.accuracy}
-                  color="var(--chart-1)"
+                  color="#f2a65a"
                   reference={player.accuracy}
                 />
               ))}
@@ -280,10 +304,10 @@ function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWea
           ) : (
             <p className="text-sm text-muted-foreground">Not enough weapon data.</p>
           )}
-        </div>
 
-        <div className="space-y-2 rounded-lg border border-border bg-card p-3">
-          <span className="text-xs font-medium text-foreground">Situational accuracy</span>
+          <div className="border-t border-border pt-2">
+            <span className="text-[11px] font-medium text-muted-foreground">Situational</span>
+          </div>
           {situational.length ? (
             <div className="space-y-1.5">
               {situational.map((row) => (
@@ -578,12 +602,12 @@ function PlayerTable({
 
       {filtersOpen ? <FiltersPanel filters={filters} onChange={setFilters} /> : null}
 
-      <div className="min-h-[580px] overflow-x-auto rounded-lg border border-border">
+      <div className="overflow-x-auto rounded-lg border border-border">
         <Table className="min-w-[1100px]">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               {COLUMNS.map((col) => (
-                <TableHead key={col.label} className="bg-muted/40">
+                <TableHead key={col.label} className={cn('bg-muted/40', !col.key && 'w-[1%] px-2 text-center')}>
                   {col.key ? (
                     <button className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => sort(col.key!)}>
                       {col.label}
@@ -608,6 +632,9 @@ function PlayerTable({
                     <TableCell>
                       <div className="flex items-center gap-1.5 font-medium">
                         {player.name}
+                        {player.isAwper ? (
+                          <Badge variant="outline" title={`${player.awpKills} AWP kills (${pct(player.awpKillRate)} of all kills)`}>AWPer</Badge>
+                        ) : null}
                         <ChevronDown className={cn('size-3.5 text-muted-foreground transition-transform', open && 'rotate-180')} />
                       </div>
                     </TableCell>
@@ -623,8 +650,8 @@ function PlayerTable({
                     <TableCell>
                       <Badge variant={statusVariant(player.status)}>{STATUS_LABEL[player.status]}</Badge>
                     </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
+                    <TableCell className="w-[1%] px-2">
+                      <div className="flex items-center justify-center gap-1">
                         <button
                           className={cn('text-muted-foreground hover:text-foreground', player.saved && 'text-primary hover:text-primary')}
                           title={player.saved ? 'Unsave player' : 'Save player'}
@@ -921,6 +948,7 @@ function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 
           <GuideSection title="Exposure and response">
             <GuideItem term="TTD">Time from first spotted tick to first damage. The table shows a round-weighted median; `p10` in details is the fast 10% tail. Repeated low TTD is more relevant than one fast duel.</GuideItem>
+            <GuideItem term="AWPer">Players with at least 5 AWP kills and at least 25% of all kills made with the AWP. Their details split AWP TTD from non-AWP TTD for a fairer comparison with riflers.</GuideItem>
             <GuideItem term="Reaction">Time from first spotted tick to first shot. It is a demo-derived estimate, not a laboratory reaction-time test; pre-aim, sound cues and prediction affect it.</GuideItem>
             <GuideItem term="Crosshair @ exposure">Median angular distance from crosshair to opponent at confirmed exposure. Lower means stronger crosshair placement, not cheating by itself.</GuideItem>
             <GuideItem term="First shot error">Median angular distance at the first shot. Read it together with TTD and reaction instead of treating it as a standalone verdict.</GuideItem>
