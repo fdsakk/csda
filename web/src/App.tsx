@@ -267,7 +267,7 @@ function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWea
 
       <div className="grid gap-3 lg:grid-cols-3">
         <div className="space-y-2 rounded-lg border border-border bg-card p-3">
-          <span className="text-xs font-medium text-foreground">Kills by weapon</span>
+          <span className="mb-3 block text-xs font-medium text-foreground">Kills by weapon</span>
           {killWeapons.length ? (
             <div className="space-y-1.5">
               {killWeapons.map((weapon) => (
@@ -286,7 +286,7 @@ function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWea
         </div>
 
         <div className="space-y-2 rounded-lg border border-border bg-card p-3">
-          <span className="text-xs font-medium text-foreground">Accuracy</span>
+          <span className="mb-3 block text-xs font-medium text-foreground">Accuracy</span>
           {accuracyWeapons.length ? (
             <div className="space-y-1.5">
               {accuracyWeapons.map((weapon) => (
