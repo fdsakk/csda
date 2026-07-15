@@ -203,7 +203,7 @@ function Histogram({
 function BarRow({ label, detail, value, color, reference }: { label: string; detail: string; value: number; color: string; reference?: number }) {
   return (
     <div className="grid grid-cols-[7rem_1fr_3rem] items-center gap-2 text-xs">
-      <span className="truncate text-foreground" title={label}>{label}</span>
+      <span className="truncate text-[13px] text-foreground" title={label}>{label}</span>
       <div className="relative h-2.5 overflow-hidden rounded-full bg-muted">
         <div className="h-full rounded-full" style={{ width: `${Math.min(100, value * 100)}%`, background: color }} />
         {reference !== undefined ? (
