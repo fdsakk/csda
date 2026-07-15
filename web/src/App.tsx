@@ -221,6 +221,10 @@ function BarRow({ label, detail, value, color, reference }: { label: string; det
 
 function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWeapon[] }) {
   const rules = player.triggeredRules ?? [];
+  const accuracyWeapons = weapons
+    .filter((weapon) => weapon.weaponName && weapon.shots >= 10)
+    .toSorted((a, b) => b.shots - a.shots)
+    .slice(0, 6);
   const killWeapons = weapons
     .filter((weapon) => weapon.weaponName && weapon.kills > 0)
     .toSorted((a, b) => b.kills - a.kills);
@@ -282,7 +286,28 @@ function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWea
         </div>
 
         <div className="space-y-2 rounded-lg border border-border bg-card p-3">
-          <span className="text-xs font-medium text-foreground">Situational accuracy</span>
+          <span className="text-xs font-medium text-foreground">Accuracy</span>
+          {accuracyWeapons.length ? (
+            <div className="space-y-1.5">
+              {accuracyWeapons.map((weapon) => (
+                <BarRow
+                  key={weapon.weaponName}
+                  label={weapon.weaponName}
+                  detail={`${number.format(weapon.shots)} shots · ${weapon.kills} kills`}
+                  value={weapon.accuracy}
+                  color="#f2a65a"
+                  reference={player.accuracy}
+                />
+              ))}
+              <p className="text-[10px] text-muted-foreground">vertical mark = overall accuracy ({pct(player.accuracy)})</p>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Not enough weapon data.</p>
+          )}
+
+          <div className="border-t border-border pt-2">
+            <span className="text-[11px] font-medium text-muted-foreground">Situational</span>
+          </div>
           {situational.length ? (
             <div className="space-y-1.5">
               {situational.map((row) => (
