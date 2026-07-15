@@ -602,12 +602,12 @@ function PlayerTable({
 
       {filtersOpen ? <FiltersPanel filters={filters} onChange={setFilters} /> : null}
 
-      <div className="min-h-[580px] overflow-x-auto rounded-lg border border-border">
+      <div className="overflow-x-auto rounded-lg border border-border">
         <Table className="min-w-[1100px]">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               {COLUMNS.map((col) => (
-                <TableHead key={col.label} className="bg-muted/40">
+                <TableHead key={col.label} className={cn('bg-muted/40', !col.key && 'w-[1%] px-2 text-center')}>
                   {col.key ? (
                     <button className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => sort(col.key!)}>
                       {col.label}
@@ -650,8 +650,8 @@ function PlayerTable({
                     <TableCell>
                       <Badge variant={statusVariant(player.status)}>{STATUS_LABEL[player.status]}</Badge>
                     </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
+                    <TableCell className="w-[1%] px-2">
+                      <div className="flex items-center justify-center gap-1">
                         <button
                           className={cn('text-muted-foreground hover:text-foreground', player.saved && 'text-primary hover:text-primary')}
                           title={player.saved ? 'Unsave player' : 'Save player'}
