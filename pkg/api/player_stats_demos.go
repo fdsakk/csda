@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 )
 
@@ -30,6 +31,29 @@ func SetDemoEnabled(ctx context.Context, databasePath, checksum string, enabled 
 		return ErrDemoNotFound
 	}
 	return nil
+}
+
+// DeleteDemo permanently removes a demo and all of its stats (player demo
+// stats, encounters, reactions, weapon stats and evidence cascade with it).
+// It returns the stored demo path so callers can also remove the file.
+func DeleteDemo(ctx context.Context, databasePath, checksum string) (string, error) {
+	db, err := openPlayerStatsDB(databasePath)
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+	var path string
+	err = db.QueryRowContext(ctx, `SELECT path FROM demos WHERE checksum=?`, checksum).Scan(&path)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrDemoNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if _, err = db.ExecContext(ctx, `DELETE FROM demos WHERE checksum=?`, checksum); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // SetPlayerSaved marks or unmarks a player as manually tracked.

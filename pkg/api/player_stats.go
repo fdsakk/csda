@@ -36,7 +36,12 @@ type PlayerStatsBuildOptions struct {
 	// TrisDir holds awpy-style .tri map geometry (or a tris.zip archive) used
 	// for geometric visibility checks. Defaults to "tris".
 	TrisDir string
-	Force   bool
+	// AllowNoGeometry permits analyzing demos for maps without .tri geometry,
+	// falling back to the (much less accurate) server spotted flag. Disabled
+	// by default because the fallback produces heavily skewed TTD/reaction
+	// numbers that silently corrupt aggregates.
+	AllowNoGeometry bool
+	Force           bool
 	// OnDemoProcessed, when set, is called after each demo finishes (imported,
 	// skipped or failed) with the number processed so far and the total.
 	OnDemoProcessed func(processed, total int)
@@ -327,6 +332,14 @@ func analyzeOneDemoForStats(path string, options PlayerStatsBuildOptions) analyz
 		analyzeOptions.onProgress = func(fraction float64) { options.OnDemoProgress(path, fraction) }
 	}
 	match, err := analyzeDemo(path, analyzeOptions)
+	if err == nil && !options.AllowNoGeometry && collector.visEngine == nil {
+		mapName := ""
+		if match != nil {
+			mapName = match.MapName
+		}
+		err = fmt.Errorf("no map geometry for %q in %q: refusing to fall back to the inaccurate spotted-flag visibility (add %s/%s.tri or tris.zip, or enable AllowNoGeometry)", mapName, options.TrisDir, options.TrisDir, mapName)
+		return analyzedDemoStats{path: path, err: err}
+	}
 	return analyzedDemoStats{path: path, match: match, stats: collector.result, err: err}
 }
 
@@ -431,13 +444,11 @@ func storeAnalyzedDemo(ctx context.Context, db *sql.DB, match *Match, stats Demo
 		return err
 	}
 	defer tx.Rollback()
-	var existingID int64
-	err = tx.QueryRowContext(ctx, `SELECT id FROM demos WHERE checksum = ?`, match.Checksum).Scan(&existingID)
-	if err == nil {
-		if _, err = tx.ExecContext(ctx, `DELETE FROM demos WHERE id = ?`, existingID); err != nil {
-			return err
-		}
-	} else if !errors.Is(err, sql.ErrNoRows) {
+	// A re-analyzed demo replaces the previous analysis. Match by checksum,
+	// but also by file name + map: the header checksum includes the file size,
+	// so the same demo re-uploaded through a lossy path (e.g. a different
+	// machine) can carry a different checksum and would otherwise duplicate.
+	if _, err = tx.ExecContext(ctx, `DELETE FROM demos WHERE checksum = ? OR (file_name = ? AND map_name = ?)`, match.Checksum, match.DemoFileName, match.MapName); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO demos(checksum,path,file_name,map_name,demo_date,tick_rate,build_number,source,analysis_version,imported_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,

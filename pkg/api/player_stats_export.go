@@ -393,8 +393,11 @@ func ImportPlayerStatsData(ctx context.Context, databasePath string, payload *Pl
 	}
 
 	for _, demo := range payload.Demos {
+		// Skip demos already known by checksum, but also by file name + map:
+		// the checksum covers the file size, so a re-encoded copy of the same
+		// demo would otherwise import as a duplicate.
 		var existingID int64
-		err := tx.QueryRowContext(ctx, `SELECT id FROM demos WHERE checksum=?`, demo.Checksum).Scan(&existingID)
+		err := tx.QueryRowContext(ctx, `SELECT id FROM demos WHERE checksum=? OR (file_name=? AND map_name=?)`, demo.Checksum, demo.FileName, demo.MapName).Scan(&existingID)
 		if err == nil {
 			result.Skipped++
 			continue

@@ -71,7 +71,8 @@ func TestStoreAndAggregateMultipleDemosBySteamID(t *testing.T) {
 	}
 	steamID := uint64(76561198000000001)
 	for index, name := range []string{"Alice", "Alice2", "Alice"} {
-		match := &Match{Checksum: string(rune('a' + index)), DemoFilePath: "demo.dem", DemoFileName: "demo", MapName: "de_test", Date: time.Unix(int64(index), 0), TickRate: 64, BuildNumber: 1, Source: constants.DemoSourceValve}
+		fileName := "demo" + string(rune('a'+index))
+		match := &Match{Checksum: string(rune('a' + index)), DemoFilePath: fileName + ".dem", DemoFileName: fileName, MapName: "de_test", Date: time.Unix(int64(index), 0), TickRate: 64, BuildNumber: 1, Source: constants.DemoSourceValve}
 		stats := DemoStats{
 			Players: map[uint64]*DemoPlayerStats{steamID: {SteamID64: steamID, Name: name, Rounds: 12, Shots: 40, HitShots: 20, DamageEvents: 20, HeadHitEvents: 10, Kills: 15, Deaths: 9, FirstBulletEncounters: 20, FirstBulletHeadHits: 5, TTDSamples: 20, TTDSumMS: 3000}},
 			Weapons: map[uint64]map[string]*DemoWeaponStats{steamID: {
@@ -148,6 +149,47 @@ func TestStoreReplacesExistingDemoChecksum(t *testing.T) {
 	}
 }
 
+func TestStoreReplacesDemoWithSameFileNameAndMap(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "stats.db")
+	db, err := openPlayerStatsDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats := DemoStats{Players: map[uint64]*DemoPlayerStats{1: {SteamID64: 1, Name: "one", Shots: 10}}, Weapons: map[uint64]map[string]*DemoWeaponStats{}}
+	// Same demo file re-analyzed with a different checksum (e.g. the file size
+	// changed between machines) must replace the previous analysis.
+	first := &Match{Checksum: "old", DemoFilePath: "auto-1.dem", DemoFileName: "auto-1", MapName: "de_mirage", Date: time.Now(), Source: constants.DemoSourceValve}
+	if err := storeAnalyzedDemo(ctx, db, first, stats); err != nil {
+		t.Fatal(err)
+	}
+	stats.Players[1].Shots = 30
+	second := &Match{Checksum: "new", DemoFilePath: "auto-1.dem", DemoFileName: "auto-1", MapName: "de_mirage", Date: time.Now(), Source: constants.DemoSourceValve}
+	if err := storeAnalyzedDemo(ctx, db, second, stats); err != nil {
+		t.Fatal(err)
+	}
+	// A demo with the same file name on another map must not be replaced.
+	other := &Match{Checksum: "other", DemoFilePath: "auto-1.dem", DemoFileName: "auto-1", MapName: "de_dust2", Date: time.Now(), Source: constants.DemoSourceValve}
+	if err := storeAnalyzedDemo(ctx, db, other, stats); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var demos int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM demos`).Scan(&demos); err != nil {
+		t.Fatal(err)
+	}
+	if demos != 2 {
+		t.Fatalf("demos=%d, want 2 (replaced same-name same-map, kept other map)", demos)
+	}
+	var shots int
+	if err := db.QueryRow(`SELECT s.shots FROM player_demo_stats s JOIN demos d ON d.id=s.demo_id WHERE d.checksum='new'`).Scan(&shots); err != nil {
+		t.Fatal(err)
+	}
+	if shots != 30 {
+		t.Fatalf("shots=%d, want 30 from the newer analysis", shots)
+	}
+}
+
 func TestDemosEnabledColumnDefaultsToOne(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "stats.db")
@@ -167,6 +209,60 @@ func TestDemosEnabledColumnDefaultsToOne(t *testing.T) {
 	}
 	if enabled != 1 {
 		t.Fatalf("enabled=%d, want 1", enabled)
+	}
+}
+
+func TestDeleteDemoRemovesAllStats(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "stats.db")
+	db, err := openPlayerStatsDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steamID := uint64(76561198000000001)
+	match := &Match{Checksum: "del1", DemoFilePath: "/tmp/a.dem", DemoFileName: "a", MapName: "de_test", Date: time.Now(), Source: constants.DemoSourceValve}
+	stats := DemoStats{
+		Players:    map[uint64]*DemoPlayerStats{steamID: {SteamID64: steamID, Name: "Alice", Rounds: 10, Shots: 50}},
+		Weapons:    map[uint64]map[string]*DemoWeaponStats{steamID: {"AK-47": {SteamID64: steamID, WeaponName: "AK-47", Shots: 50}}},
+		Encounters: []DemoEncounter{{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 150}},
+		Reactions:  []DemoReaction{{AttackerSteamID64: steamID, VictimSteamID64: 2, ReactionTimeMS: 100}},
+		Evidence:   []DemoEvidence{{SteamID64: steamID, VictimID: 2, Kind: "test", Value: 1, Details: "{}"}},
+	}
+	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	path, err := DeleteDemo(ctx, dbPath, "del1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/tmp/a.dem" {
+		t.Fatalf("path=%q, want /tmp/a.dem", path)
+	}
+	if _, err := DeleteDemo(ctx, dbPath, "del1"); !errors.Is(err, ErrDemoNotFound) {
+		t.Fatalf("err=%v, want ErrDemoNotFound", err)
+	}
+	db, err = openPlayerStatsDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, table := range []string{"demos", "player_demo_stats", "encounters", "reactions", "player_demo_weapon_stats", "evidence"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("%s still has %d rows after delete", table, count)
+		}
+	}
+	report, err := buildPlayerStatsReport(ctx, PlayerStatsReportOptions{DatabasePath: dbPath, Config: DefaultSuspicionConfig()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Players) != 0 {
+		t.Fatalf("players=%d, want 0 after demo deletion", len(report.Players))
 	}
 }
 

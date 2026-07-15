@@ -21,6 +21,9 @@ FROM gcr.io/distroless/static-debian12
 WORKDIR /app
 COPY --from=server /out/csda /app/csda
 COPY --from=web /web/dist /app/web/dist
+# Map geometry for geometric visibility checks. Without it the analysis would
+# fail (it refuses to silently fall back to the inaccurate spotted flag).
+COPY tris /app/tris
 EXPOSE 8080
 # Bind to all interfaces so the port is reachable from the Windows host.
 ENTRYPOINT ["/app/csda", "web", "--addr=0.0.0.0:8080", "--assets=/app/web/dist", "--db=/data/player-stats.db", "--uploads=/data/uploads"]

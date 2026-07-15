@@ -134,6 +134,14 @@ export async function setDemoEnabled(checksum: string, enabled: boolean): Promis
   }
 }
 
+export async function deleteDemo(checksum: string): Promise<void> {
+  const response = await fetch(`/api/demos/${encodeURIComponent(checksum)}`, { method: 'DELETE' });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ error: undefined }));
+    throw new Error(body.error ?? `Request failed: ${response.status}`);
+  }
+}
+
 export async function setPlayerSaved(steamId: string, saved: boolean): Promise<void> {
   return patchPlayer(steamId, { saved });
 }

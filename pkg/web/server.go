@@ -1,17 +1,12 @@
 package web
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash"
-	"hash/crc32"
 	"io"
 	"net/http"
 	"os"
@@ -25,91 +20,9 @@ import (
 
 	"github.com/akiver/cs-demo-analyzer/pkg/api"
 	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
-	"github.com/klauspost/compress/zstd"
-	"github.com/ulikunitz/xz/lzma"
 )
 
 const maxUploadBytes int64 = 8 << 30
-
-const (
-	zipMethodLZMA         = 14
-	zipLZMAPropertiesSize = 5
-	maxLZMADictionarySize = 256 << 20
-)
-
-type zipLZMAReadCloser struct {
-	reader       io.Reader
-	file         *os.File
-	checksum     hash.Hash32
-	expectedCRC  uint32
-	expectedSize uint64
-	read         uint64
-}
-
-func (reader *zipLZMAReadCloser) Read(buffer []byte) (int, error) {
-	n, err := reader.reader.Read(buffer)
-	if n > 0 {
-		_, _ = reader.checksum.Write(buffer[:n])
-		reader.read += uint64(n)
-	}
-	if errors.Is(err, io.EOF) && (reader.read != reader.expectedSize || reader.checksum.Sum32() != reader.expectedCRC) {
-		return n, zip.ErrChecksum
-	}
-	return n, err
-}
-
-func (reader *zipLZMAReadCloser) Close() error {
-	return reader.file.Close()
-}
-
-func openZIPLZMAEntry(archivePath string, entry *zip.File) (io.ReadCloser, error) {
-	file, err := os.Open(archivePath)
-	if err != nil {
-		return nil, err
-	}
-	fail := func(err error) (io.ReadCloser, error) {
-		_ = file.Close()
-		return nil, err
-	}
-	offset, err := entry.DataOffset()
-	if err != nil {
-		return fail(err)
-	}
-	compressed := io.NewSectionReader(file, offset, int64(entry.CompressedSize64))
-	var zipHeader [4]byte
-	if _, err := io.ReadFull(compressed, zipHeader[:]); err != nil {
-		return fail(fmt.Errorf("invalid ZIP LZMA header: %w", err))
-	}
-	propertiesSize := binary.LittleEndian.Uint16(zipHeader[2:])
-	if propertiesSize != zipLZMAPropertiesSize {
-		return fail(fmt.Errorf("unsupported ZIP LZMA properties size %d", propertiesSize))
-	}
-	var properties [zipLZMAPropertiesSize]byte
-	if _, err := io.ReadFull(compressed, properties[:]); err != nil {
-		return fail(fmt.Errorf("invalid ZIP LZMA properties: %w", err))
-	}
-	var lzmaHeader [lzma.HeaderLen]byte
-	copy(lzmaHeader[:zipLZMAPropertiesSize], properties[:])
-	binary.LittleEndian.PutUint64(lzmaHeader[zipLZMAPropertiesSize:], entry.UncompressedSize64)
-	decoded, err := (lzma.ReaderConfig{DictCap: maxLZMADictionarySize}).NewReader(io.MultiReader(bytes.NewReader(lzmaHeader[:]), compressed))
-	if err != nil {
-		return fail(err)
-	}
-	return &zipLZMAReadCloser{
-		reader:       decoded,
-		file:         file,
-		checksum:     crc32.NewIEEE(),
-		expectedCRC:  entry.CRC32,
-		expectedSize: entry.UncompressedSize64,
-	}, nil
-}
-
-func openZIPEntry(archivePath string, entry *zip.File) (io.ReadCloser, error) {
-	if entry.Method == zipMethodLZMA {
-		return openZIPLZMAEntry(archivePath, entry)
-	}
-	return entry.Open()
-}
 
 type uploadCollector struct {
 	dir   string
@@ -160,64 +73,6 @@ func (uploads *uploadCollector) addDemo(name string, reader io.Reader) error {
 		uploads.names = append(uploads.names, candidate)
 		return nil
 	}
-}
-
-func saveUploadArchive(dir string, reader io.Reader) (string, error) {
-	file, err := os.CreateTemp(dir, ".upload-*.zip")
-	if err != nil {
-		return "", err
-	}
-	path := file.Name()
-	_, copyErr := io.Copy(file, reader)
-	closeErr := file.Close()
-	if copyErr != nil || closeErr != nil {
-		_ = os.Remove(path)
-		if copyErr != nil {
-			return "", copyErr
-		}
-		return "", closeErr
-	}
-	return path, nil
-}
-
-func (uploads *uploadCollector) addZip(path string) error {
-	archive, err := zip.OpenReader(path)
-	if err != nil {
-		return fmt.Errorf("invalid ZIP archive: %w", err)
-	}
-	defer archive.Close()
-	archive.RegisterDecompressor(zstd.ZipMethodWinZip, zstd.ZipDecompressor())
-	archive.RegisterDecompressor(zstd.ZipMethodPKWare, zstd.ZipDecompressor())
-
-	demos := 0
-	for _, entry := range archive.File {
-		if entry.FileInfo().IsDir() || !strings.EqualFold(filepath.Ext(entry.Name), ".dem") {
-			continue
-		}
-		if entry.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("ZIP entry %q is a symlink", entry.Name)
-		}
-		if entry.UncompressedSize64 > uint64(maxUploadBytes-uploads.bytes) {
-			return fmt.Errorf("demos exceed the %d GiB upload limit", maxUploadBytes>>30)
-		}
-		reader, openErr := openZIPEntry(path, entry)
-		if openErr != nil {
-			return openErr
-		}
-		copyErr := uploads.addDemo(entry.Name, reader)
-		closeErr := reader.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-		demos++
-	}
-	if demos == 0 {
-		return errors.New("ZIP archive contains no .dem files")
-	}
-	return nil
 }
 
 type Options struct {
@@ -300,6 +155,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/jobs", s.handleJobs)
 	s.mux.HandleFunc("POST /api/uploads", s.handleUpload)
 	s.mux.HandleFunc("PATCH /api/demos/{checksum}", s.handleDemoToggle)
+	s.mux.HandleFunc("DELETE /api/demos/{checksum}", s.handleDemoDelete)
 	s.mux.HandleFunc("PATCH /api/players/{steamId}", s.handlePlayerSaved)
 	s.mux.HandleFunc("GET /api/export", s.handleExport)
 	s.mux.HandleFunc("POST /api/import", s.handleImport)
@@ -385,19 +241,10 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		var uploadErr error
-		switch {
-		case strings.EqualFold(filepath.Ext(filename), ".dem"):
+		if strings.EqualFold(filepath.Ext(filename), ".dem") {
 			uploadErr = uploads.addDemo(filename, part)
-		case strings.EqualFold(filepath.Ext(filename), ".zip"):
-			archivePath, saveErr := saveUploadArchive(dir, part)
-			if saveErr != nil {
-				uploadErr = saveErr
-			} else {
-				uploadErr = uploads.addZip(archivePath)
-				_ = os.Remove(archivePath)
-			}
-		default:
-			uploadErr = fmt.Errorf("%s is not a .dem or .zip file", filename)
+		} else {
+			uploadErr = fmt.Errorf("%s is not a .dem file", filename)
 		}
 		part.Close()
 		if uploadErr != nil {
@@ -453,6 +300,28 @@ func (s *Server) handleDemoToggle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleDemoDelete(w http.ResponseWriter, r *http.Request) {
+	demoPath, err := api.DeleteDemo(r.Context(), s.options.DatabasePath, r.PathValue("checksum"))
+	if errors.Is(err, api.ErrDemoNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "demo not found"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	// Remove the uploaded file too, but only when it actually lives inside
+	// this server's uploads folder (imported rows may reference foreign paths).
+	if uploadsRoot, absErr := filepath.Abs(s.options.UploadsPath); absErr == nil {
+		if absPath, pathErr := filepath.Abs(demoPath); pathErr == nil {
+			if relative, relErr := filepath.Rel(uploadsRoot, absPath); relErr == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				_ = os.Remove(absPath)
+			}
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

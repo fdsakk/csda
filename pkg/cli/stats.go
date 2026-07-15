@@ -18,18 +18,19 @@ func (values *stringListFlag) String() string         { return strings.Join(*val
 func (values *stringListFlag) Set(value string) error { *values = append(*values, value); return nil }
 
 type statsFlags struct {
-	database     string
-	demos        stringListFlag
-	demoDirs     stringListFlag
-	recursive    bool
-	jobs         int
-	source       string
-	force        bool
-	confirmTicks int
-	trisDir      string
-	output       string
-	format       string
-	configPath   string
+	database        string
+	demos           stringListFlag
+	demoDirs        stringListFlag
+	recursive       bool
+	jobs            int
+	source          string
+	force           bool
+	confirmTicks    int
+	trisDir         string
+	allowNoGeometry bool
+	output          string
+	format          string
+	configPath      string
 }
 
 func addBuildFlags(fs *flag.FlagSet, values *statsFlags) {
@@ -42,6 +43,7 @@ func addBuildFlags(fs *flag.FlagSet, values *statsFlags) {
 	fs.BoolVar(&values.force, "force", false, "Re-analyze demos already present in the database")
 	fs.IntVar(&values.confirmTicks, "visibility-confirmation-ticks", 3, "Consecutive spotted ticks required to confirm exposure")
 	fs.StringVar(&values.trisDir, "tris-dir", "tris", "Folder with awpy .tri map geometry (or tris.zip) for geometric visibility")
+	fs.BoolVar(&values.allowNoGeometry, "allow-no-geometry", false, "Analyze maps without .tri geometry using the inaccurate spotted-flag fallback (skews TTD/reaction)")
 }
 
 func addReportFlags(fs *flag.FlagSet, values *statsFlags) {
@@ -55,6 +57,7 @@ func (values statsFlags) buildOptions() api.PlayerStatsBuildOptions {
 		DatabasePath: values.database, DemoPaths: values.demos, DemoDirectories: values.demoDirs,
 		Recursive: values.recursive, Jobs: values.jobs, Source: constants.DemoSource(values.source),
 		Force: values.force, VisibilityConfirmationTicks: values.confirmTicks, TrisDir: values.trisDir,
+		AllowNoGeometry: values.allowNoGeometry,
 	}
 }
 

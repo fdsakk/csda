@@ -1,6 +1,6 @@
 import { DragEvent, Fragment, type ReactNode, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Ban, BookOpen, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FileUp, Film, ListFilter, Search, Upload, X } from 'lucide-react';
-import { Demo, getJobs, getReport, importStats, Job, Player, PlayerWeapon, Report, setDemoEnabled, setPlayerBanned, setPlayerSaved, uploadDemos } from './api';
+import { ArrowDown, ArrowUp, Ban, BookOpen, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FileUp, Film, ListFilter, Search, Trash2, Upload, X } from 'lucide-react';
+import { deleteDemo, Demo, getJobs, getReport, importStats, Job, Player, PlayerWeapon, Report, setDemoEnabled, setPlayerBanned, setPlayerSaved, uploadDemos } from './api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -42,8 +42,8 @@ function Dropzone({ onQueued }: { onQueued: (job: Job) => void }) {
   const [error, setError] = useState('');
 
   const accept = useCallback((incoming: File[]) => {
-    const demos = incoming.filter((file) => /\.(dem|zip)$/i.test(file.name));
-    setError(demos.length === incoming.length ? '' : 'Only .dem files or .zip archives were added.');
+    const demos = incoming.filter((file) => /\.dem$/i.test(file.name));
+    setError(demos.length === incoming.length ? '' : 'Only .dem files were added.');
     setFiles((current) => {
       const known = new Set(current.map((file) => `${file.name}:${file.size}`));
       return [...current, ...demos.filter((file) => !known.has(`${file.name}:${file.size}`))];
@@ -70,12 +70,12 @@ function Dropzone({ onQueued }: { onQueued: (job: Job) => void }) {
         onDragLeave={() => setDragging(false)}
         onDrop={drop}
       >
-        <input ref={input} type="file" accept=".dem,.zip,application/zip" multiple hidden onChange={(event) => accept([...(event.target.files ?? [])])} />
+        <input ref={input} type="file" accept=".dem" multiple hidden onChange={(event) => accept([...(event.target.files ?? [])])} />
         <div className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
           <Upload className="size-5" />
         </div>
-        <p className="text-sm font-medium">Drop CS2 demo files or ZIP archives here</p>
-        <p className="text-sm text-muted-foreground">.dem recordings or .zip archives — drag &amp; drop or</p>
+        <p className="text-sm font-medium">Drop CS2 demo files here</p>
+        <p className="text-sm text-muted-foreground">.dem recordings — drag &amp; drop or</p>
         <Button variant="outline" size="sm" onClick={() => input.current?.click()}>Browse files</Button>
       </div>
 
@@ -747,6 +747,14 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
     finally { setPending(null); }
   };
 
+  const remove = async (demo: Demo) => {
+    if (!window.confirm(`Permanently delete ${demo.fileName} and all of its stats?`)) return;
+    setPending(demo.checksum);
+    try { await deleteDemo(demo.checksum); setMessage(''); onChanged(); }
+    catch (cause) { report(cause instanceof Error ? cause.message : 'Delete failed', true); }
+    finally { setPending(null); }
+  };
+
   // Toggles every demo of the day (also the ones on other pages).
   const toggleDay = async (key: string, target: boolean) => {
     setPending(key);
@@ -812,8 +820,8 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
                 <Table className="min-w-[760px]">
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                      {['In stats', 'File', 'Map', 'Played', 'Source', 'Players', 'Rounds', 'Added'].map((label) => (
-                        <TableHead key={label} className="bg-muted/40">{label}</TableHead>
+                      {['In stats', 'File', 'Map', 'Played', 'Source', 'Players', 'Rounds', 'Added', ''].map((label, index) => (
+                        <TableHead key={label || index} className="bg-muted/40">{label}</TableHead>
                       ))}
                     </TableRow>
                   </TableHeader>
@@ -836,7 +844,7 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
                                 onChange={() => void toggleDay(key, !allEnabled)}
                               />
                             </TableCell>
-                            <TableCell colSpan={7} className="text-xs font-medium text-muted-foreground">
+                            <TableCell colSpan={8} className="text-xs font-medium text-muted-foreground">
                               {key === 'unknown' ? 'Unknown date' : new Date(key).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                               {' · '}{enabledInDay}/{dayDemos.length} in stats
                             </TableCell>
@@ -859,6 +867,16 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
                               <TableCell className="tabular-nums">{demo.players}</TableCell>
                               <TableCell className="tabular-nums">{demo.rounds}</TableCell>
                               <TableCell className="tabular-nums">{demo.importedAt ? new Date(demo.importedAt).toLocaleDateString() : '—'}</TableCell>
+                              <TableCell className="w-[1%] px-2">
+                                <button
+                                  className="text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+                                  title="Delete demo and all of its stats"
+                                  disabled={pending === demo.checksum}
+                                  onClick={() => void remove(demo)}
+                                >
+                                  <Trash2 className="size-4" />
+                                </button>
+                              </TableCell>
                             </TableRow>
                           ))}
                         </Fragment>
