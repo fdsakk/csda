@@ -8,7 +8,14 @@ RUN bun install --frozen-lockfile
 COPY web/ ./
 RUN bun run build
 
-# 2. Build the Go server (pure Go sqlite driver -> static binary, no CGO)
+# 2. Download the map geometry used for visibility checks. Keeping this in a
+# separate stage makes the build self-contained without adding Python/Awpy to
+# the final image.
+FROM python:3.13-slim AS geometry
+RUN pip install --no-cache-dir awpy==2.0.2 \
+    && awpy get tris
+
+# 3. Build the Go server (pure Go sqlite driver -> static binary, no CGO)
 FROM golang:1.23 AS server
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -16,14 +23,14 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/csda ./cmd/cli
 
-# 3. Minimal runtime image
+# 4. Minimal runtime image
 FROM gcr.io/distroless/static-debian12
 WORKDIR /app
 COPY --from=server /out/csda /app/csda
 COPY --from=web /web/dist /app/web/dist
 # Map geometry for geometric visibility checks. Without it the analysis would
 # fail (it refuses to silently fall back to the inaccurate spotted flag).
-COPY tris /app/tris
+COPY --from=geometry /root/.awpy/tris /app/tris
 EXPOSE 8080
 # Bind to all interfaces so the port is reachable from the Windows host.
 ENTRYPOINT ["/app/csda", "web", "--addr=0.0.0.0:8080", "--assets=/app/web/dist", "--db=/data/player-stats.db", "--uploads=/data/uploads"]
