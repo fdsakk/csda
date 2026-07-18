@@ -15,6 +15,8 @@ type Field = {
   step?: number;
   suffix?: string;
   percent?: boolean;
+  min?: number;
+  max?: number;
 };
 
 const GROUPS: { title: string; description: string; fields: Field[] }[] = [
@@ -29,37 +31,69 @@ const GROUPS: { title: string; description: string; fields: Field[] }[] = [
     ],
   },
   {
-    title: 'Rifle timing',
-    description: 'Non-AWP weighted averages. Lower values are more suspicious.',
+    title: 'Final score bands',
+    description: 'The fused score is mapped to Normal, Watch or Cheater only after every evidence group has been combined.',
     fields: [
-      { key: 'ttdCheaterMs', label: 'Cheater TTD', description: 'Below this value sets Cheater.', suffix: 'ms' },
-      { key: 'ttdSuspiciousMs', label: 'Watch TTD', description: 'Below this value sets Watch, or Cheater with elite stats.', suffix: 'ms' },
-      { key: 'reactionCheaterMs', label: 'Cheater reaction', description: 'Average reaction below this value sets Cheater.', suffix: 'ms' },
+      { key: 'scoreWatchThreshold', label: 'Watch score', description: 'Minimum final score for Watch.', suffix: '/100', min: 0, max: 100 },
+      { key: 'scoreCheaterThreshold', label: 'Cheater score', description: 'Minimum final score for Cheater.', suffix: '/100', min: 0, max: 100 },
+      { key: 'scoreCurveExponent', label: 'Score curve', description: 'Below 1 expands meaningful evidence toward the top of the 0–100 scale.', step: 0.05, min: 0.05, max: 2 },
     ],
   },
   {
-    title: 'AWP timing',
-    description: 'AWP has separate bands because one-shot flicks naturally produce lower TTD.',
+    title: 'Evidence mapping and confidence',
+    description: 'Metric anchors become soft evidence rather than immediate verdicts. Sample confidence prevents a small sample from carrying full strength.',
     fields: [
-      { key: 'awpTtdCheaterMs', label: 'Cheater TTD', description: 'AWP TTD below this value sets Cheater.', suffix: 'ms' },
-      { key: 'awpTtdWatchMs', label: 'Watch TTD', description: 'AWP TTD below this value sets Watch.', suffix: 'ms' },
+      { key: 'metricWatchEvidence', label: 'Watch-anchor evidence', description: 'Evidence assigned at a metric’s watch anchor.', step: 1, suffix: '%', percent: true },
+      { key: 'metricCheaterEvidence', label: 'Cheater-anchor evidence', description: 'Evidence assigned at a metric’s cheater anchor.', step: 1, suffix: '%', percent: true },
+      { key: 'sampleConfidenceFloor', label: 'Confidence floor', description: 'Minimum retained evidence once the hard sample gate is met.', step: 1, suffix: '%', percent: true },
+      { key: 'sampleConfidenceK', label: 'Confidence K', description: 'Samples needed to recover half of the confidence above the floor.', step: 1, min: 1 },
     ],
   },
   {
-    title: 'Elite supporting stats',
-    description: 'Any one of these promotes rifle TTD in the watch band to Cheater.',
+    title: 'Rifle timing anchors',
+    description: 'Non-AWP weighted averages. Lower values produce stronger timing evidence.',
     fields: [
-      { key: 'eliteKd', label: 'K/D', description: 'Kills divided by deaths.', step: 0.1 },
-      { key: 'eliteHeadHitRate', label: 'Head-hit rate', description: 'Share of damaging hits that hit the head.', step: 1, suffix: '%', percent: true },
-      { key: 'eliteAccuracy', label: 'Accuracy', description: 'Share of tracked shots that hit.', step: 1, suffix: '%', percent: true },
+      { key: 'ttdSuspiciousMs', label: 'TTD watch anchor', description: 'TTD at this value receives watch-anchor evidence.', suffix: 'ms' },
+      { key: 'ttdCheaterMs', label: 'TTD cheater anchor', description: 'TTD at this value receives cheater-anchor evidence.', suffix: 'ms' },
+      { key: 'reactionWatchMs', label: 'Reaction watch anchor', description: 'Reaction time at this value receives watch-anchor evidence.', suffix: 'ms' },
+      { key: 'reactionCheaterMs', label: 'Reaction cheater anchor', description: 'Reaction time at this value receives cheater-anchor evidence.', suffix: 'ms' },
     ],
   },
   {
-    title: 'Standalone head-hit flags',
-    description: 'Applied independently after the minimum head-hit sample is reached.',
+    title: 'AWP timing anchors',
+    description: 'AWP has separate anchors because one-shot flicks naturally produce lower TTD.',
     fields: [
-      { key: 'headHitWatchThreshold', label: 'Watch threshold', description: 'Head-hit rate at or above this value sets Watch.', step: 1, suffix: '%', percent: true },
-      { key: 'headHitCheaterThreshold', label: 'Cheater threshold', description: 'Head-hit rate at or above this value sets Cheater.', step: 1, suffix: '%', percent: true },
+      { key: 'awpTtdWatchMs', label: 'Watch anchor', description: 'AWP TTD at this value receives watch-anchor evidence.', suffix: 'ms' },
+      { key: 'awpTtdCheaterMs', label: 'Cheater anchor', description: 'AWP TTD at this value receives cheater-anchor evidence.', suffix: 'ms' },
+    ],
+  },
+  {
+    title: 'Precision anchors',
+    description: 'Head-hit and accuracy share one precision group; only the stronger result is counted.',
+    fields: [
+      { key: 'eliteHeadHitRate', label: 'Head-hit evidence start', description: 'First soft head-hit evidence anchor.', step: 1, suffix: '%', percent: true },
+      { key: 'headHitWatchThreshold', label: 'Head-hit watch anchor', description: 'Middle head-hit evidence anchor.', step: 1, suffix: '%', percent: true },
+      { key: 'headHitCheaterThreshold', label: 'Head-hit cheater anchor', description: 'High head-hit evidence anchor.', step: 1, suffix: '%', percent: true },
+      { key: 'eliteAccuracy', label: 'Accuracy watch anchor', description: 'Accuracy at this value receives watch-anchor evidence.', step: 1, suffix: '%', percent: true },
+      { key: 'accuracyCheater', label: 'Accuracy cheater anchor', description: 'Accuracy at this value receives cheater-anchor evidence.', step: 1, suffix: '%', percent: true },
+    ],
+  },
+  {
+    title: 'Performance anchors',
+    description: 'K/D cannot flag a player by itself. It only amplifies timing or precision evidence already present.',
+    fields: [
+      { key: 'eliteKd', label: 'K/D watch anchor', description: 'Start of K/D supporting evidence.', step: 0.1, min: 0.1 },
+      { key: 'eliteKdCheater', label: 'K/D cheater anchor', description: 'High K/D supporting evidence.', step: 0.1, min: 0.1 },
+    ],
+  },
+  {
+    title: 'Evidence fusion',
+    description: 'Weights control group strength. Synergy rewards simultaneous timing and precision evidence after correlated metrics are collapsed.',
+    fields: [
+      { key: 'timingWeight', label: 'Timing weight', description: 'Strength of the timing group.', step: 1, suffix: '%', percent: true },
+      { key: 'precisionWeight', label: 'Precision weight', description: 'Strength of the precision group.', step: 1, suffix: '%', percent: true },
+      { key: 'performanceWeight', label: 'K/D support weight', description: 'Maximum strength of the gated K/D amplifier.', step: 1, suffix: '%', percent: true },
+      { key: 'synergyWeight', label: 'Timing + precision synergy', description: 'Bonus when both independent groups are elevated.', step: 1, suffix: '%', percent: true },
     ],
   },
 ];
@@ -72,8 +106,8 @@ function ThresholdField({ field, config, onChange }: { field: Field; config: Sus
       <span className="relative block">
         <Input
           type="number"
-          min={field.percent ? 0 : field.step === 0.1 ? 0.1 : 1}
-          max={field.percent ? 100 : undefined}
+          min={field.min ?? (field.percent ? 0 : field.step === 0.1 ? 0.1 : 1)}
+          max={field.max ?? (field.percent ? 100 : undefined)}
           step={field.step ?? 1}
           value={shown}
           className={cn(field.suffix && 'pr-11')}
@@ -132,13 +166,19 @@ export function ThresholdsDialog({ onChanged }: { onChanged: () => void }) {
         <div className="flex max-h-[calc(100dvh-3rem)] flex-col">
           <header className="border-b border-border px-6 py-4 pr-14">
             <DialogTitle className="text-xl">Watch and cheater thresholds</DialogTitle>
-            <p className="mt-1 text-sm text-muted-foreground">Changes apply immediately to the current report. Lower timing thresholds are stricter.</p>
+            <p className="mt-1 text-sm text-muted-foreground">Tune the complete aggregate evidence score. Changes apply immediately to the current report.</p>
           </header>
 
           <div className="cheat-sheet-scroll min-h-0 flex-1 overflow-y-auto px-6 py-5">
             {loading ? <p className="py-16 text-center text-sm text-muted-foreground">Loading thresholds…</p> : null}
             {!loading && config ? (
               <div className="space-y-6">
+                <div className="rounded-lg border border-border bg-muted/40 p-4 text-sm leading-5 text-muted-foreground">
+                  <p className="font-medium text-foreground">How the score works</p>
+                  <p className="mt-1">
+                    Every aggregate metric becomes soft evidence from 0–100 and is reduced by sample confidence. The strongest TTD/reaction result forms the timing group; the strongest head-hit/accuracy result forms precision. Those independent groups are fused without double-counting correlated stats. K/D can only amplify an existing signal, while timing plus precision receives a bounded synergy bonus. The final curve maps the result to the Normal, Watch and Cheater bands below.
+                  </p>
+                </div>
                 {GROUPS.map((group) => (
                   <section key={group.title} className="space-y-4 border-b border-border pb-6 last:border-0 last:pb-0">
                     <div>

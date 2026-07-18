@@ -38,6 +38,7 @@ export function CheatSheet({ open, onClose }: { open: boolean; onClose: () => vo
         <div className="cheat-sheet-scroll min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
           <GuideSection title="Start here">
             <GuideItem term="Status">A review priority, not proof. `Cheater` (red) marks stats that are not humanly reproducible over many games; `Watch` (yellow) is a grey-zone flag. Always expand the row and inspect the reason badges below the player stats before judging.</GuideItem>
+            <GuideItem term="Score">A 0–100 aggregate evidence score. Timing and precision are fused as independent groups, K/D only amplifies an existing signal, and timing plus precision receives a bounded synergy bonus. Correlated metrics inside a group are not added together.</GuideItem>
             <GuideItem term="Samples">Check the number of demos, shots and sample count (`n=`). A small sample can make an ordinary streak look extreme.</GuideItem>
             <GuideItem term="Workflow">Use the table to find a player, open their row, note multiple independent signals, then review the relevant rounds in the demo.</GuideItem>
           </GuideSection>
@@ -50,9 +51,9 @@ export function CheatSheet({ open, onClose }: { open: boolean; onClose: () => vo
           </GuideSection>
 
           <GuideSection title="Exposure and response">
-            <GuideItem term="TTD (rifle)">Time from first spotted tick to first damage on non-AWP weapons, as a round-weighted long-term average. This is what the table column and status use. Values below the watch threshold are suspicious; values below the cheater threshold set the red status. The current bands and elite supporting-stat thresholds can be changed in Thresholds. `p10 (all)` in details is the fast 10% tail across every weapon.</GuideItem>
-            <GuideItem term="TTD (AWP)">AWP-only TTD, flagged separately for anyone with enough AWP encounters. The AWP is a one-flick one-shot weapon so it has its own, lower watch and cheater bands configured in Thresholds. A player can look clean on the rifle and still get flagged here (or the reverse).</GuideItem>
-            <GuideItem term="Reaction (rifle)">Time from first spotted tick to first shot on non-AWP weapons. It is a demo-derived estimate, not a laboratory reaction-time test; pre-aim, sound cues and prediction affect it. The red cutoff is configured in Thresholds.</GuideItem>
+            <GuideItem term="TTD (rifle)">Time from first spotted tick to first damage on non-AWP weapons, as a round-weighted long-term average. Lower values create progressively stronger timing evidence between the configurable anchors; they no longer act as a binary verdict. `p10 (all)` in details is the fast 10% tail across every weapon.</GuideItem>
+            <GuideItem term="TTD (AWP)">AWP-only TTD. The AWP is a one-flick one-shot weapon, so it has its own lower evidence anchors. Only the strongest timing metric contributes to the group score.</GuideItem>
+            <GuideItem term="Reaction (rifle)">Time from first spotted tick to first shot on non-AWP weapons. It is a demo-derived estimate, not a laboratory reaction-time test; pre-aim, sound cues and prediction affect it. It shares the timing group with TTD.</GuideItem>
             <GuideItem term="Crosshair @ exposure">Median angular distance from crosshair to opponent at confirmed exposure. Lower means stronger crosshair placement, not cheating by itself.</GuideItem>
             <GuideItem term="First shot error">Median angular distance at the first shot. Read it together with TTD and reaction instead of treating it as a standalone verdict.</GuideItem>
           </GuideSection>
@@ -61,7 +62,7 @@ export function CheatSheet({ open, onClose }: { open: boolean; onClose: () => vo
             <GuideItem term="Unspotted damage">Damage where the analyzer did not have a confirmed spotted state. Check the demo for sound, teammate information, wallbang lines, smokes and replay limitations before judging it.</GuideItem>
             <GuideItem term="First-bullet head / snap">Signals around unusually accurate first shots and fast aim reduction. They are strongest when repeated over many encounters and paired with unusual TTD or reactions.</GuideItem>
             <GuideItem term="Smoke / wall kills">Useful review context, but legitimate wallbangs and common angles are expected in Counter-Strike. Look for repetition and timing, not isolated kills.</GuideItem>
-            <GuideItem term="Reason badges">Coloured badges below the player stats show exactly which rules set the status: red for Cheater and yellow for Watch.</GuideItem>
+            <GuideItem term="Reason badges">Coloured badges below the player stats show the strongest metric from each evidence group that contributed to the final Watch or Cheater score.</GuideItem>
           </GuideSection>
 
           <GuideSection title="Saved players and demos">

@@ -1,4 +1,4 @@
-export type Rule = { name: string; value: number; sample: number; tier: 'watch' | 'cheater' };
+export type Rule = { name: string; value: number; sample: number; tier: 'watch' | 'cheater'; score: number };
 
 export type SuspicionConfig = {
   minimumDemos: number;
@@ -7,14 +7,28 @@ export type SuspicionConfig = {
   ttdCheaterMs: number;
   ttdSuspiciousMs: number;
   reactionCheaterMs: number;
+  reactionWatchMs: number;
   awpTtdCheaterMs: number;
   awpTtdWatchMs: number;
   eliteKd: number;
   eliteHeadHitRate: number;
   eliteAccuracy: number;
+  eliteKdCheater: number;
+  accuracyCheater: number;
   headHitMinimumEvents: number;
   headHitWatchThreshold: number;
   headHitCheaterThreshold: number;
+  scoreWatchThreshold: number;
+  scoreCheaterThreshold: number;
+  metricWatchEvidence: number;
+  metricCheaterEvidence: number;
+  timingWeight: number;
+  precisionWeight: number;
+  performanceWeight: number;
+  synergyWeight: number;
+  sampleConfidenceFloor: number;
+  sampleConfidenceK: number;
+  scoreCurveExponent: number;
 };
 
 export type Player = {
@@ -74,6 +88,10 @@ export type Player = {
   banned: boolean;
   eligible: boolean;
   status: 'normal' | 'watch' | 'cheater' | 'insufficient_sample';
+  suspicionScore: number;
+  timingScore: number;
+  precisionScore: number;
+  performanceScore: number;
   triggeredRules: Rule[] | null;
 };
 

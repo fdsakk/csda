@@ -12,7 +12,7 @@ import { countActiveFilters, DEFAULT_FILTERS, matchesFilters, TableFilters } fro
 import { ms, number, pct } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
-type SortKey = 'status' | 'name' | 'demoCount' | 'shots' | 'kills' | 'deaths' | 'accuracy' | 'headHitRate' | 'headshotKillRate' | 'nonAwpTtdWeightedMs' | 'nonAwpReactionWeightedMs';
+type SortKey = 'status' | 'suspicionScore' | 'name' | 'demoCount' | 'shots' | 'kills' | 'deaths' | 'accuracy' | 'headHitRate' | 'headshotKillRate' | 'nonAwpTtdWeightedMs' | 'nonAwpReactionWeightedMs';
 
 const STATUS_RANK: Record<Player['status'], number> = { cheater: 3, watch: 2, normal: 1, insufficient_sample: 0 };
 
@@ -59,6 +59,7 @@ const COLUMNS: { key: SortKey | null; label: string }[] = [
   { key: 'headshotKillRate', label: 'HS kills' },
   { key: 'nonAwpTtdWeightedMs', label: 'TTD' },
   { key: 'nonAwpReactionWeightedMs', label: 'Reaction' },
+  { key: 'suspicionScore', label: 'Score' },
   { key: 'status', label: 'Status' },
   { key: null, label: 'Actions' },
 ];
@@ -98,7 +99,7 @@ export function PlayerTable({
       // saved players pin to the top only under the default (status) sort
       if (sortKey === 'status' && a.saved !== b.saved) return a.saved ? -1 : 1;
       const order = sortKey === 'status'
-        ? STATUS_RANK[a.status] - STATUS_RANK[b.status]
+        ? STATUS_RANK[a.status] - STATUS_RANK[b.status] || a.suspicionScore - b.suspicionScore
         : (() => {
             const av = a[sortKey], bv = b[sortKey];
             return typeof av === 'string' ? av.localeCompare(String(bv)) : Number(av) - Number(bv);
@@ -187,6 +188,7 @@ export function PlayerTable({
                     <TableCell className="tabular-nums">{pct(player.headshotKillRate)}</TableCell>
                     <TableCell className="tabular-nums">{ms(player.nonAwpTtdWeightedMs, player.nonAwpTtdSamples)}</TableCell>
                     <TableCell className="tabular-nums">{ms(player.nonAwpReactionWeightedMs, player.nonAwpReactionSamples)}</TableCell>
+                    <TableCell className="font-medium tabular-nums">{player.eligible ? Math.round(player.suspicionScore) : '—'}</TableCell>
                     <TableCell>
                       <Badge variant={statusVariant(player.status)}>{STATUS_LABEL[player.status]}</Badge>
                     </TableCell>

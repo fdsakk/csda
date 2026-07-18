@@ -58,37 +58,47 @@ type PlayerStatsBuildResult struct {
 }
 
 // SuspicionConfig holds the thresholds for the two-tier flagging heuristic
-// (watch = yellow, cheater = red). The tiers are driven by time-to-damage as a
-// long-term average, cross-checked against performance stats. There is no
-// numeric score any more — a player lands in the worst tier any rule triggers.
+// (watch = yellow, cheater = red). Correlated metrics are collapsed into
+// timing, precision and performance groups and fused into a 0–100 score.
 type SuspicionConfig struct {
 	MinimumDemos      int `json:"minimumDemos"`
 	MinimumShots      int `json:"minimumShots"`
 	TTDMinimumSamples int `json:"ttdMinimumSamples"`
 
-	// Non-AWP time-to-damage (weighted long-term average, ms). Below the cheater
-	// line the aim is not humanly reproducible over many games; the grey band
-	// above it only flags red when the supporting stats are also elite. AWP
-	// kills are excluded — the AWP is a one-shot weapon and has its own tier.
-	TTDCheaterMS      float64 `json:"ttdCheaterMs"`      // < this → cheater outright
-	TTDSuspiciousMS   float64 `json:"ttdSuspiciousMs"`   // < this → at least watch, cheater if stats elite
-	ReactionCheaterMS float64 `json:"reactionCheaterMs"` // non-AWP reaction weighted avg below this → cheater
+	// Non-AWP timing anchors (weighted long-term averages, ms). Lower values
+	// produce stronger evidence; they do not directly assign a status.
+	TTDCheaterMS      float64 `json:"ttdCheaterMs"`
+	TTDSuspiciousMS   float64 `json:"ttdSuspiciousMs"`
+	ReactionCheaterMS float64 `json:"reactionCheaterMs"`
+	ReactionWatchMS   float64 `json:"reactionWatchMs"`
 
-	// AWP-only time-to-damage tier, applied to AWPers. Single flick + one-shot
-	// kill makes AWP TTD naturally lower, so it gets its own, lower thresholds.
-	AWPTTDCheaterMS float64 `json:"awpTtdCheaterMs"` // AWP TTD < this → cheater
-	AWPTTDWatchMS   float64 `json:"awpTtdWatchMs"`   // AWP TTD < this → watch
+	// AWP-only timing anchors are lower because of one-shot flick kills.
+	AWPTTDCheaterMS float64 `json:"awpTtdCheaterMs"`
+	AWPTTDWatchMS   float64 `json:"awpTtdWatchMs"`
 
-	// "Elite supporting stats" — any one of these promotes a suspicious-band
-	// TTD (TTDCheaterMS..TTDSuspiciousMS) from watch to cheater.
+	// Precision and performance evidence anchors.
 	EliteKD          float64 `json:"eliteKd"`
 	EliteHeadHitRate float64 `json:"eliteHeadHitRate"`
 	EliteAccuracy    float64 `json:"eliteAccuracy"`
+	EliteKDCheater   float64 `json:"eliteKdCheater"`
+	AccuracyCheater  float64 `json:"accuracyCheater"`
 
-	// Head-hit-rate standalone flags, gated by a minimum damage-event sample.
+	// Head-hit evidence anchors, gated by a minimum damage-event sample.
 	HeadHitMinimumEvents    int     `json:"headHitMinimumEvents"`
-	HeadHitWatchThreshold   float64 `json:"headHitWatchThreshold"`   // >= this → watch
-	HeadHitCheaterThreshold float64 `json:"headHitCheaterThreshold"` // >= this → cheater
+	HeadHitWatchThreshold   float64 `json:"headHitWatchThreshold"`
+	HeadHitCheaterThreshold float64 `json:"headHitCheaterThreshold"`
+
+	ScoreWatchThreshold   float64 `json:"scoreWatchThreshold"`
+	ScoreCheaterThreshold float64 `json:"scoreCheaterThreshold"`
+	MetricWatchEvidence   float64 `json:"metricWatchEvidence"`
+	MetricCheaterEvidence float64 `json:"metricCheaterEvidence"`
+	TimingWeight          float64 `json:"timingWeight"`
+	PrecisionWeight       float64 `json:"precisionWeight"`
+	PerformanceWeight     float64 `json:"performanceWeight"`
+	SynergyWeight         float64 `json:"synergyWeight"`
+	SampleConfidenceFloor float64 `json:"sampleConfidenceFloor"`
+	SampleConfidenceK     float64 `json:"sampleConfidenceK"`
+	ScoreCurveExponent    float64 `json:"scoreCurveExponent"`
 }
 
 func DefaultSuspicionConfig() SuspicionConfig {
@@ -98,14 +108,28 @@ func DefaultSuspicionConfig() SuspicionConfig {
 		TTDCheaterMS:            320,
 		TTDSuspiciousMS:         360,
 		ReactionCheaterMS:       200,
+		ReactionWatchMS:         240,
 		AWPTTDCheaterMS:         210,
 		AWPTTDWatchMS:           280,
 		EliteKD:                 1.8,
 		EliteHeadHitRate:        .40,
 		EliteAccuracy:           .30,
+		EliteKDCheater:          3.0,
+		AccuracyCheater:         .45,
 		HeadHitMinimumEvents:    30,
 		HeadHitWatchThreshold:   .50,
 		HeadHitCheaterThreshold: .60,
+		ScoreWatchThreshold:     52,
+		ScoreCheaterThreshold:   77,
+		MetricWatchEvidence:     .30,
+		MetricCheaterEvidence:   .85,
+		TimingWeight:            1,
+		PrecisionWeight:         1,
+		PerformanceWeight:       .75,
+		SynergyWeight:           .35,
+		SampleConfidenceFloor:   .75,
+		SampleConfidenceK:       30,
+		ScoreCurveExponent:      .50,
 	}
 }
 
@@ -115,7 +139,7 @@ func ValidateSuspicionConfig(config SuspicionConfig) error {
 	if config.MinimumDemos < 1 || config.MinimumShots < 1 || config.TTDMinimumSamples < 1 || config.HeadHitMinimumEvents < 1 {
 		return errors.New("minimum sample counts must be at least 1")
 	}
-	if config.TTDCheaterMS <= 0 || config.TTDSuspiciousMS <= 0 || config.ReactionCheaterMS <= 0 || config.AWPTTDCheaterMS <= 0 || config.AWPTTDWatchMS <= 0 {
+	if config.TTDCheaterMS <= 0 || config.TTDSuspiciousMS <= 0 || config.ReactionCheaterMS <= 0 || config.ReactionWatchMS <= 0 || config.AWPTTDCheaterMS <= 0 || config.AWPTTDWatchMS <= 0 {
 		return errors.New("timing thresholds must be greater than 0")
 	}
 	if config.TTDCheaterMS >= config.TTDSuspiciousMS {
@@ -124,12 +148,16 @@ func ValidateSuspicionConfig(config SuspicionConfig) error {
 	if config.AWPTTDCheaterMS >= config.AWPTTDWatchMS {
 		return errors.New("AWP cheater TTD must be lower than watch TTD")
 	}
-	if config.EliteKD <= 0 {
-		return errors.New("elite K/D must be greater than 0")
+	if config.ReactionCheaterMS >= config.ReactionWatchMS {
+		return errors.New("reaction cheater threshold must be lower than watch threshold")
+	}
+	if config.EliteKD <= 0 || config.EliteKDCheater <= config.EliteKD {
+		return errors.New("K/D evidence anchors must be positive and ordered")
 	}
 	for name, value := range map[string]float64{
 		"elite head-hit rate":        config.EliteHeadHitRate,
 		"elite accuracy":             config.EliteAccuracy,
+		"accuracy cheater anchor":    config.AccuracyCheater,
 		"head-hit watch threshold":   config.HeadHitWatchThreshold,
 		"head-hit cheater threshold": config.HeadHitCheaterThreshold,
 	} {
@@ -139,6 +167,35 @@ func ValidateSuspicionConfig(config SuspicionConfig) error {
 	}
 	if config.HeadHitWatchThreshold >= config.HeadHitCheaterThreshold {
 		return errors.New("head-hit watch threshold must be lower than cheater threshold")
+	}
+	if config.EliteHeadHitRate >= config.HeadHitWatchThreshold {
+		return errors.New("elite head-hit anchor must be lower than the watch threshold")
+	}
+	if config.EliteAccuracy >= config.AccuracyCheater {
+		return errors.New("accuracy watch anchor must be lower than the cheater anchor")
+	}
+	if config.ScoreWatchThreshold < 0 || config.ScoreCheaterThreshold > 100 || config.ScoreWatchThreshold >= config.ScoreCheaterThreshold {
+		return errors.New("score thresholds must be ordered between 0 and 100")
+	}
+	if config.MetricWatchEvidence < 0 || config.MetricCheaterEvidence > 1 || config.MetricWatchEvidence >= config.MetricCheaterEvidence {
+		return errors.New("metric evidence anchors must be ordered between 0 and 1")
+	}
+	for name, value := range map[string]float64{
+		"timing weight":           config.TimingWeight,
+		"precision weight":        config.PrecisionWeight,
+		"performance weight":      config.PerformanceWeight,
+		"synergy weight":          config.SynergyWeight,
+		"sample confidence floor": config.SampleConfidenceFloor,
+	} {
+		if value < 0 || value > 1 {
+			return fmt.Errorf("%s must be between 0 and 1", name)
+		}
+	}
+	if config.SampleConfidenceK <= 0 {
+		return errors.New("sample confidence K must be greater than 0")
+	}
+	if config.ScoreCurveExponent <= 0 || config.ScoreCurveExponent > 2 {
+		return errors.New("score curve exponent must be greater than 0 and at most 2")
 	}
 	return nil
 }

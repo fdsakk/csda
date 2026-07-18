@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,13 +17,14 @@ import (
 	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
 )
 
-// PlayerSuspicionRule records a watch or cheater signal that contributed to
-// the player's final status. Signals do not carry points; the worst tier wins.
+// PlayerSuspicionRule records the strongest metric from an evidence group that
+// contributed to the player's final score and status.
 type PlayerSuspicionRule struct {
 	Name   string  `json:"name"`
 	Value  float64 `json:"value"`
 	Sample int     `json:"sample"`
 	Tier   string  `json:"tier"`
+	Score  float64 `json:"score"`
 }
 
 type PlayerStatsReportRow struct {
@@ -88,6 +90,10 @@ type PlayerStatsReportRow struct {
 	Banned               bool                  `json:"banned"`
 	Eligible             bool                  `json:"eligible"`
 	Status               string                `json:"status"`
+	SuspicionScore       float64               `json:"suspicionScore"`
+	TimingScore          float64               `json:"timingScore"`
+	PrecisionScore       float64               `json:"precisionScore"`
+	PerformanceScore     float64               `json:"performanceScore"`
 	TriggeredRules       []PlayerSuspicionRule `json:"triggeredRules"`
 }
 
@@ -363,91 +369,134 @@ func collectEncounterSamples(ctx context.Context, db *sql.DB) (map[uint64]*playe
 	return byPlayer, rows.Err()
 }
 
-// promote keeps the worst tier seen so far. cheater > watch > normal.
-func promote(current, next string) string {
-	rank := map[string]int{"normal": 0, "watch": 1, "cheater": 2}
-	if rank[next] > rank[current] {
-		return next
-	}
-	return current
+type scoredSignal struct {
+	name     string
+	value    float64
+	sample   int
+	evidence float64
 }
 
-// flagPlayer assigns a two-tier status (watch = yellow, cheater = red) from a
-// small set of hard heuristics, and records the signals it saw for the UI.
-//
-// Rifle/pistol (non-AWP) time-to-damage, read as a long-term average:
-//
-//	360+ ms   normal
-//	320-360   suspicious | watch, or cheater if the player is also fragging
-//	                       hard (K/D, head-accuracy or accuracy elite)
-//	< 320     not humanly reproducible over many games | cheater
-//
-// AWP TTD is excluded from the above (one flick + one-shot kill makes it
-// naturally lower). It gets its own, lower tier for anyone with enough AWP
-// encounters: < 210 ms cheater, < 280 ms watch. The two are independent — a
-// player can look clean on the rifle and get flagged on the AWP, or vice versa.
-//
-// Non-AWP reaction time (see→first shot) below ~200 ms as an average is a
-// trigger/aimbot signal. Head-hit-rate flags on its own at very high,
-// well-sampled values.
+func clamp01(value float64) float64 { return max(0, min(1, value)) }
+
+// anchoredEvidence maps a metric's watch and cheater anchors to configurable
+// evidence levels, while still allowing more extreme values to approach 1.
+func anchoredEvidence(value, watch, cheater float64, lowerIsWorse bool, config SuspicionConfig) float64 {
+	position := (value - watch) / (cheater - watch)
+	if lowerIsWorse {
+		position = (watch - value) / (watch - cheater)
+	}
+	return clamp01(config.MetricWatchEvidence + position*(config.MetricCheaterEvidence-config.MetricWatchEvidence))
+}
+
+func headHitEvidence(value float64, config SuspicionConfig) float64 {
+	middleEvidence := (config.MetricWatchEvidence + config.MetricCheaterEvidence) / 2
+	if value <= config.HeadHitWatchThreshold {
+		position := (value - config.EliteHeadHitRate) / (config.HeadHitWatchThreshold - config.EliteHeadHitRate)
+		return clamp01(config.MetricWatchEvidence + position*(middleEvidence-config.MetricWatchEvidence))
+	}
+	position := (value - config.HeadHitWatchThreshold) / (config.HeadHitCheaterThreshold - config.HeadHitWatchThreshold)
+	return clamp01(middleEvidence + position*(config.MetricCheaterEvidence-middleEvidence))
+}
+
+func sampleConfidence(sample int, config SuspicionConfig) float64 {
+	n := float64(max(0, sample))
+	return config.SampleConfidenceFloor + (1-config.SampleConfidenceFloor)*n/(n+config.SampleConfidenceK)
+}
+
+func strongest(signals []scoredSignal) scoredSignal {
+	best := scoredSignal{}
+	for _, signal := range signals {
+		if signal.evidence > best.evidence {
+			best = signal
+		}
+	}
+	return best
+}
+
+// flagPlayer fuses aggregate evidence into a 0–100 score. Timing and precision
+// use the strongest metric in each group to avoid double-counting correlated
+// stats. K/D can only amplify an existing core signal. Timing + precision also
+// receive a bounded synergy bonus because their combination is rarer than
+// either signal in isolation.
 func flagPlayer(row *PlayerStatsReportRow, config SuspicionConfig) {
 	row.Eligible = row.DemoCount >= config.MinimumDemos && row.Shots >= config.MinimumShots
 	if !row.Eligible {
 		row.Status = "insufficient_sample"
 		return
 	}
-	row.Status = "normal"
-	signal := func(name string, value float64, sample int, tier string) {
-		row.Status = promote(row.Status, tier)
-		row.TriggeredRules = append(row.TriggeredRules, PlayerSuspicionRule{Name: name, Value: value, Sample: sample, Tier: tier})
+
+	timingSignals := make([]scoredSignal, 0, 3)
+	if row.NonAWPTTDSamples >= config.TTDMinimumSamples && row.NonAWPTTDWeightedMS > 0 {
+		timingSignals = append(timingSignals, scoredSignal{
+			name: "ttd_score", value: row.NonAWPTTDWeightedMS, sample: row.NonAWPTTDSamples,
+			evidence: anchoredEvidence(row.NonAWPTTDWeightedMS, config.TTDSuspiciousMS, config.TTDCheaterMS, true, config) * sampleConfidence(row.NonAWPTTDSamples, config),
+		})
+	}
+	if row.AWPTTDSamples >= config.TTDMinimumSamples && row.AWPTTDWeightedMS > 0 {
+		timingSignals = append(timingSignals, scoredSignal{
+			name: "awp_ttd_score", value: row.AWPTTDWeightedMS, sample: row.AWPTTDSamples,
+			evidence: anchoredEvidence(row.AWPTTDWeightedMS, config.AWPTTDWatchMS, config.AWPTTDCheaterMS, true, config) * sampleConfidence(row.AWPTTDSamples, config),
+		})
+	}
+	if row.NonAWPReactionSamples >= config.TTDMinimumSamples && row.NonAWPReactionWeightedMS > 0 {
+		timingSignals = append(timingSignals, scoredSignal{
+			name: "reaction_score", value: row.NonAWPReactionWeightedMS, sample: row.NonAWPReactionSamples,
+			evidence: anchoredEvidence(row.NonAWPReactionWeightedMS, config.ReactionWatchMS, config.ReactionCheaterMS, true, config) * sampleConfidence(row.NonAWPReactionSamples, config),
+		})
+	}
+
+	precisionSignals := []scoredSignal{{
+		name: "accuracy_score", value: row.Accuracy, sample: row.Shots,
+		evidence: anchoredEvidence(row.Accuracy, config.EliteAccuracy, config.AccuracyCheater, false, config) * sampleConfidence(row.Shots, config),
+	}}
+	if row.DamageEvents >= config.HeadHitMinimumEvents {
+		precisionSignals = append(precisionSignals, scoredSignal{
+			name: "head_hit_score", value: row.HeadHitRate, sample: row.DamageEvents,
+			evidence: headHitEvidence(row.HeadHitRate, config) * sampleConfidence(row.DamageEvents, config),
+		})
 	}
 
 	kd := ratio(row.Kills, row.Deaths)
 	if row.Deaths == 0 && row.Kills > 0 {
 		kd = float64(row.Kills)
 	}
-	eliteStats := kd >= config.EliteKD || row.HeadHitRate >= config.EliteHeadHitRate || row.Accuracy >= config.EliteAccuracy
+	performanceSignal := scoredSignal{
+		name: "kd_score", value: kd, sample: row.Kills + row.Deaths,
+		evidence: anchoredEvidence(kd, config.EliteKD, config.EliteKDCheater, false, config) * sampleConfidence(row.Kills+row.Deaths, config),
+	}
 
-	// Non-AWP time-to-damage: the primary signal.
-	if row.NonAWPTTDSamples >= config.TTDMinimumSamples && row.NonAWPTTDWeightedMS > 0 {
-		switch {
-		case row.NonAWPTTDWeightedMS < config.TTDCheaterMS:
-			signal("ttd_impossible", row.NonAWPTTDWeightedMS, row.NonAWPTTDSamples, "cheater")
-		case row.NonAWPTTDWeightedMS < config.TTDSuspiciousMS:
-			if eliteStats {
-				signal("ttd_low_elite_stats", row.NonAWPTTDWeightedMS, row.NonAWPTTDSamples, "cheater")
-			} else {
-				signal("ttd_low", row.NonAWPTTDWeightedMS, row.NonAWPTTDSamples, "watch")
-			}
+	timingSignal := strongest(timingSignals)
+	precisionSignal := strongest(precisionSignals)
+	timing := clamp01(config.TimingWeight * timingSignal.evidence)
+	precision := clamp01(config.PrecisionWeight * precisionSignal.evidence)
+	performance := clamp01(config.PerformanceWeight * performanceSignal.evidence)
+	core := 1 - (1-timing)*(1-precision)
+	performanceSupport := performance * max(timing, precision)
+	combined := 1 - (1-core)*(1-performanceSupport)
+	combined += config.SynergyWeight * math.Sqrt(timing*precision) * (1 - combined)
+	combined = clamp01(combined)
+
+	row.TimingScore = timing * 100
+	row.PrecisionScore = precision * 100
+	row.PerformanceScore = performance * 100
+	row.SuspicionScore = 100 * math.Pow(combined, config.ScoreCurveExponent)
+	row.Status = "normal"
+	if row.SuspicionScore >= config.ScoreCheaterThreshold {
+		row.Status = "cheater"
+	} else if row.SuspicionScore >= config.ScoreWatchThreshold {
+		row.Status = "watch"
+	}
+	if row.Status == "normal" {
+		return
+	}
+	for _, signal := range []scoredSignal{timingSignal, precisionSignal, performanceSignal} {
+		if signal.evidence <= 0 {
+			continue
 		}
+		row.TriggeredRules = append(row.TriggeredRules, PlayerSuspicionRule{
+			Name: signal.name, Value: signal.value, Sample: signal.sample, Tier: row.Status, Score: signal.evidence * 100,
+		})
 	}
-
-	// AWP time-to-damage: its own tier, for anyone with enough AWP encounters —
-	// a rifler who only triggers on the AWP still gets caught here.
-	if row.AWPTTDSamples >= config.TTDMinimumSamples && row.AWPTTDWeightedMS > 0 {
-		switch {
-		case row.AWPTTDWeightedMS < config.AWPTTDCheaterMS:
-			signal("awp_ttd_impossible", row.AWPTTDWeightedMS, row.AWPTTDSamples, "cheater")
-		case row.AWPTTDWeightedMS < config.AWPTTDWatchMS:
-			signal("awp_ttd_low", row.AWPTTDWeightedMS, row.AWPTTDSamples, "watch")
-		}
-	}
-
-	// Non-AWP reaction time (see → first shot) below human floor as an average.
-	if row.NonAWPReactionSamples >= config.TTDMinimumSamples && row.NonAWPReactionWeightedMS > 0 && row.NonAWPReactionWeightedMS < config.ReactionCheaterMS {
-		signal("reaction_impossible", row.NonAWPReactionWeightedMS, row.NonAWPReactionSamples, "cheater")
-	}
-
-	// Head-hit-rate standalone.
-	if row.DamageEvents >= config.HeadHitMinimumEvents {
-		switch {
-		case row.HeadHitRate >= config.HeadHitCheaterThreshold:
-			signal("head_hit_rate", row.HeadHitRate, row.DamageEvents, "cheater")
-		case row.HeadHitRate >= config.HeadHitWatchThreshold:
-			signal("head_hit_rate", row.HeadHitRate, row.DamageEvents, "watch")
-		}
-	}
-
 }
 
 func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOptions) (*PlayerStatsReport, error) {
@@ -626,13 +675,13 @@ func writeCSV(path string, lines [][]string) error {
 	return err
 }
 func writePlayersCSV(path string, rows []PlayerStatsReportRow) error {
-	lines := [][]string{{"steamid", "name", "aliases", "demos", "rounds", "shots", "hit shots", "accuracy", "damage events", "head hits", "head hit rate", "kills", "headshot kills", "headshot kill rate", "smoke kills", "wall kills", "unspotted damage rate", "first bullet head rate", "snap rate", "ttd samples", "ttd mean ms", "ttd pooled median ms", "ttd weighted ms", "ttd p10 ms", "ttd under 190 rate", "reaction samples", "reaction median ms", "reaction weighted ms", "reaction p10 ms", "crosshair median angle", "first shot median angle", "moving shots", "moving hit rate", "airborne shots", "airborne hit rate", "flashed shots", "flashed hit rate", "scoped shots", "scoped hit rate", "eligible", "status", "triggered rules"}}
+	lines := [][]string{{"steamid", "name", "aliases", "demos", "rounds", "shots", "hit shots", "accuracy", "damage events", "head hits", "head hit rate", "kills", "headshot kills", "headshot kill rate", "smoke kills", "wall kills", "unspotted damage rate", "first bullet head rate", "snap rate", "ttd samples", "ttd mean ms", "ttd pooled median ms", "ttd weighted ms", "ttd p10 ms", "ttd under 190 rate", "reaction samples", "reaction median ms", "reaction weighted ms", "reaction p10 ms", "crosshair median angle", "first shot median angle", "moving shots", "moving hit rate", "airborne shots", "airborne hit rate", "flashed shots", "flashed hit rate", "scoped shots", "scoped hit rate", "eligible", "status", "suspicion score", "timing score", "precision score", "performance score", "triggered rules"}}
 	for _, r := range rows {
 		rules := make([]string, len(r.TriggeredRules))
 		for x, rule := range r.TriggeredRules {
-			rules[x] = fmt.Sprintf("%s:%s(value=%.2f,sample=%d)", rule.Name, rule.Tier, rule.Value, rule.Sample)
+			rules[x] = fmt.Sprintf("%s:%s(value=%.2f,sample=%d,evidence=%.2f)", rule.Name, rule.Tier, rule.Value, rule.Sample, rule.Score)
 		}
-		lines = append(lines, []string{u(r.SteamID64), r.Name, strings.Join(r.Names, " | "), i(r.DemoCount), i(r.Rounds), i(r.Shots), i(r.HitShots), f(r.Accuracy), i(r.DamageEvents), i(r.HeadHitEvents), f(r.HeadHitRate), i(r.Kills), i(r.HeadshotKills), f(r.HeadshotKillRate), i(r.SmokeKills), i(r.WallKills), f(r.UnspottedDamageRate), f(r.FirstBulletHeadRate), f(r.SnapRate), i(r.TTDSamples), f(r.TTDMeanMS), f(r.TTDMedianMS), f(r.TTDWeightedMS), f(r.TTDP10MS), f(r.TTDUnder190Rate), i(r.ReactionSamples), f(r.ReactionMedianMS), f(r.ReactionWeightedMS), f(r.ReactionP10MS), f(r.CrosshairMedianAngle), f(r.FirstShotMedianAngle), i(r.MovingShots), f(r.MovingHitRate), i(r.AirborneShots), f(r.AirborneHitRate), i(r.FlashedShots), f(r.FlashedHitRate), i(r.ScopedShots), f(r.ScopedHitRate), strconv.FormatBool(r.Eligible), r.Status, strings.Join(rules, " | ")})
+		lines = append(lines, []string{u(r.SteamID64), r.Name, strings.Join(r.Names, " | "), i(r.DemoCount), i(r.Rounds), i(r.Shots), i(r.HitShots), f(r.Accuracy), i(r.DamageEvents), i(r.HeadHitEvents), f(r.HeadHitRate), i(r.Kills), i(r.HeadshotKills), f(r.HeadshotKillRate), i(r.SmokeKills), i(r.WallKills), f(r.UnspottedDamageRate), f(r.FirstBulletHeadRate), f(r.SnapRate), i(r.TTDSamples), f(r.TTDMeanMS), f(r.TTDMedianMS), f(r.TTDWeightedMS), f(r.TTDP10MS), f(r.TTDUnder190Rate), i(r.ReactionSamples), f(r.ReactionMedianMS), f(r.ReactionWeightedMS), f(r.ReactionP10MS), f(r.CrosshairMedianAngle), f(r.FirstShotMedianAngle), i(r.MovingShots), f(r.MovingHitRate), i(r.AirborneShots), f(r.AirborneHitRate), i(r.FlashedShots), f(r.FlashedHitRate), i(r.ScopedShots), f(r.ScopedHitRate), strconv.FormatBool(r.Eligible), r.Status, f(r.SuspicionScore), f(r.TimingScore), f(r.PrecisionScore), f(r.PerformanceScore), strings.Join(rules, " | ")})
 	}
 	return writeCSV(path, lines)
 }

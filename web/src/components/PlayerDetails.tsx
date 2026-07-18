@@ -83,13 +83,12 @@ function BarRow({ label, detail, value, color, reference }: { label: string; det
 }
 
 const RULE_LABEL: Record<string, string> = {
-  ttd_impossible: 'Rifle TTD impossibly low',
-  ttd_low_elite_stats: 'Low rifle TTD + elite fragging',
-  ttd_low: 'Low rifle time-to-damage',
-  awp_ttd_impossible: 'AWP TTD impossibly low',
-  awp_ttd_low: 'Low AWP time-to-damage',
-  reaction_impossible: 'Rifle reaction below human floor',
-  head_hit_rate: 'Head hit rate',
+  ttd_score: 'Rifle TTD evidence',
+  awp_ttd_score: 'AWP TTD evidence',
+  reaction_score: 'Rifle reaction evidence',
+  head_hit_score: 'Head-hit evidence',
+  accuracy_score: 'Accuracy evidence',
+  kd_score: 'K/D support',
 };
 
 export function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWeapon[] }) {
@@ -109,6 +108,8 @@ export function PlayerDetails({ player, weapons }: { player: Player; weapons: Pl
     { label: 'Airborne', shots: player.airborneShots, rate: player.airborneHitRate },
   ].filter((row) => row.shots > 0);
   const stats: [string, string][] = [
+    ['Suspicion score', player.eligible ? `${Math.round(player.suspicionScore)} / 100` : 'low sample'],
+    ['Evidence groups', `T ${Math.round(player.timingScore)} · P ${Math.round(player.precisionScore)} · K/D ${Math.round(player.performanceScore)}`],
     ['Crosshair @ exposure', `${player.crosshairMedianAngle.toFixed(1)}°`],
     ['First shot error', `${player.firstShotMedianAngle.toFixed(1)}°`],
     ['Unspotted damage', pct(player.unspottedDamageRate)],
@@ -225,6 +226,7 @@ export function PlayerDetails({ player, weapons }: { player: Player; weapons: Pl
               {flagSignals.map((rule) => (
                 <span
                   key={rule.name}
+                  title={`${Math.round(rule.score)} evidence · n=${number.format(rule.sample)}`}
                   className={cn(
                     'flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs',
                     rule.tier === 'cheater'
