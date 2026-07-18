@@ -1,6 +1,5 @@
-import { type ReactNode, useEffect } from 'react';
-import { X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { type ReactNode } from 'react';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 
 function GuideSection({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -16,25 +15,13 @@ function GuideItem({ term, children }: { term: string; children: ReactNode }) {
 }
 
 export function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  useEffect(() => {
-    if (!open) return;
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [open, onClose]);
-
-  if (!open) return null;
   return (
-    <>
-      <button aria-label="Close guide" className="fixed inset-0 z-40 cursor-default bg-black/30" onClick={onClose} />
-      <aside aria-label="Cheat sheet" className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l border-border bg-background shadow-2xl">
-        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
-          <div>
-            <h2 className="text-base font-semibold">Cheat sheet: how to read the analysis</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Use signals to choose what to review in a demo — never as an automatic verdict.</p>
-          </div>
-          <Button variant="ghost" size="icon" aria-label="Close cheat sheet" onClick={onClose}><X className="size-4" /></Button>
-        </header>
+    <Sheet open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
+      <SheetContent className="w-full gap-0 p-0 sm:max-w-xl" aria-label="Cheat sheet">
+        <SheetHeader className="border-b border-border px-5 py-4 pr-12 text-left">
+          <SheetTitle className="text-base">Cheat sheet: how to read the analysis</SheetTitle>
+          <SheetDescription>Use signals to choose what to review in a demo — never as an automatic verdict.</SheetDescription>
+        </SheetHeader>
         <div className="cheat-sheet-scroll min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
           <GuideSection title="Start here">
             <GuideItem term="Status">A review priority, not proof. `Cheater` (red) marks stats that are not humanly reproducible over many games; `Watch` (yellow) is a grey-zone flag. Always expand the row and inspect the reason badges below the player stats before judging.</GuideItem>
@@ -74,7 +61,7 @@ export function CheatSheet({ open, onClose }: { open: boolean; onClose: () => vo
             <p>One metric is a reason to look, not a conclusion. Prioritize players with enough samples and multiple independent signals, then validate them against the demo timeline.</p>
           </GuideSection>
         </div>
-      </aside>
-    </>
+      </SheetContent>
+    </Sheet>
   );
 }

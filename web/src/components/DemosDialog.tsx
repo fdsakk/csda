@@ -3,7 +3,7 @@ import { FileDown, FileUp, Film, ShieldAlert, Trash2 } from 'lucide-react';
 import { clearUploads, deleteDemo, Demo, importStats, setAllDemosEnabled, setDemoEnabled } from '@/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 
@@ -89,23 +89,21 @@ export function DemosDialog({ demos, onChanged }: { demos: Demo[]; onChanged: ()
   };
 
   return (
-    <Dialog>
-      <DialogTrigger
-        render={
-          <Button variant="outline" size="sm">
-            <Film className="size-4" /> Demos ({enabledCount}/{demos.length})
-          </Button>
-        }
-      />
-      <DialogContent className="h-[calc(100dvh-3rem)] max-h-[calc(100dvh-3rem)] max-w-7xl overflow-hidden p-0">
+    <Sheet>
+      <SheetTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Film className="size-4" /> Demos ({enabledCount}/{demos.length})
+        </Button>
+      </SheetTrigger>
+      <SheetContent className="w-full gap-0 overflow-hidden p-0 sm:max-w-6xl">
         <div className="flex h-full min-h-0 flex-col">
-          <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border px-6 py-4 pr-14">
+          <SheetHeader className="flex-row flex-wrap items-center justify-between gap-4 border-b border-border px-6 py-4 pr-14 text-left">
             <div>
-              <DialogTitle className="text-2xl">Demos</DialogTitle>
-              <p className="text-sm text-muted-foreground">
+              <SheetTitle className="text-2xl">Demos</SheetTitle>
+              <SheetDescription>
                 {demos.length} demo{demos.length === 1 ? '' : 's'} · {enabledCount} included in stats
                 {warningCount ? ` · ${warningCount} quality warning${warningCount === 1 ? '' : 's'}` : ''}
-              </p>
+              </SheetDescription>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" disabled={!demos.length || enabledCount === demos.length || pending !== null} onClick={() => void toggleAll(true)}>
@@ -125,7 +123,7 @@ export function DemosDialog({ demos, onChanged }: { demos: Demo[]; onChanged: ()
                 <Trash2 className="size-4" /> Clear uploads
               </Button>
             </div>
-          </header>
+          </SheetHeader>
 
           {message ? <p className={cn('border-b border-border px-6 py-2 text-sm', failed ? 'text-destructive' : 'text-muted-foreground')}>{message}</p> : null}
 
@@ -226,7 +224,7 @@ export function DemosDialog({ demos, onChanged }: { demos: Demo[]; onChanged: ()
             <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">No demos analyzed yet.</div>
           )}
         </div>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }

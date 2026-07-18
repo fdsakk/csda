@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { RotateCcw, SlidersHorizontal, X } from 'lucide-react';
+import { RotateCcw, SlidersHorizontal } from 'lucide-react';
 import { getThresholds, setThresholds, SuspicionConfig } from '@/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 
 type ConfigKey = keyof SuspicionConfig;
@@ -142,13 +143,6 @@ export function ThresholdsDialog({ onChanged }: { onChanged: () => void }) {
       .finally(() => setLoading(false));
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [open]);
-
   const save = async () => {
     if (!config) return;
     setSaving(true);
@@ -167,21 +161,17 @@ export function ThresholdsDialog({ onChanged }: { onChanged: () => void }) {
   };
 
   return (
-    <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}><SlidersHorizontal className="size-4" /> Thresholds</Button>
-      {open ? (
-        <>
-          <button aria-label="Close thresholds" className="fixed inset-0 z-40 cursor-default bg-black/30" onClick={() => setOpen(false)} />
-          <aside aria-label="Threshold settings" className="fixed inset-y-0 right-0 z-50 flex w-full max-w-5xl flex-col border-l border-border bg-background shadow-2xl">
-            <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-3">
-              <div>
-                <h2 className="text-base font-semibold">Watch and cheater thresholds</h2>
-                <p className="mt-0.5 text-xs text-muted-foreground">Tune the complete aggregate evidence score. Changes apply immediately to the current report.</p>
-              </div>
-              <Button variant="ghost" size="icon" aria-label="Close thresholds" onClick={() => setOpen(false)}><X className="size-4" /></Button>
-            </header>
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger asChild>
+        <Button variant="outline" size="sm"><SlidersHorizontal className="size-4" /> Thresholds</Button>
+      </SheetTrigger>
+      <SheetContent className="w-full gap-0 p-0 sm:max-w-5xl" aria-label="Threshold settings">
+        <SheetHeader className="border-b border-border px-5 py-3 pr-12 text-left">
+          <SheetTitle className="text-base">Watch and cheater thresholds</SheetTitle>
+          <SheetDescription className="text-xs">Tune the complete aggregate evidence score. Changes apply immediately to the current report.</SheetDescription>
+        </SheetHeader>
 
-            <div className="cheat-sheet-scroll min-h-0 flex-1 overflow-y-auto px-5 py-3">
+        <div className="cheat-sheet-scroll min-h-0 flex-1 overflow-y-auto px-5 py-3">
               {loading ? <p className="py-16 text-center text-sm text-muted-foreground">Loading thresholds…</p> : null}
               {!loading && config ? (
                 <div>
@@ -209,9 +199,9 @@ export function ThresholdsDialog({ onChanged }: { onChanged: () => void }) {
                   ))}
                 </div>
               ) : null}
-            </div>
+        </div>
 
-            <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-5 py-3">
+        <SheetFooter className="flex-row flex-wrap items-center justify-between gap-2 border-t border-border px-5 py-3">
               <div>{message ? <p className={cn('text-xs', failed ? 'text-destructive' : 'text-muted-foreground')}>{message}</p> : null}</div>
               <div className="ml-auto flex gap-2">
                 <Button size="sm" variant="outline" disabled={!defaults || loading || saving} onClick={() => { if (defaults) { setConfig({ ...defaults }); setMessage(''); } }}>
@@ -219,10 +209,8 @@ export function ThresholdsDialog({ onChanged }: { onChanged: () => void }) {
                 </Button>
                 <Button size="sm" disabled={!config || loading || saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save thresholds'}</Button>
               </div>
-            </footer>
-          </aside>
-        </>
-      ) : null}
-    </>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
 }
