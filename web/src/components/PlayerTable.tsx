@@ -49,6 +49,7 @@ function loadStoredState(): StoredTableState {
 }
 
 const COLUMNS: { key: SortKey | null; label: string }[] = [
+  { key: 'suspicionScore', label: 'Score' },
   { key: 'name', label: 'Player' },
   { key: 'demoCount', label: 'Demos' },
   { key: 'shots', label: 'Shots' },
@@ -59,7 +60,6 @@ const COLUMNS: { key: SortKey | null; label: string }[] = [
   { key: 'headshotKillRate', label: 'HS kills' },
   { key: 'nonAwpTtdWeightedMs', label: 'TTD' },
   { key: 'nonAwpReactionWeightedMs', label: 'Reaction' },
-  { key: 'suspicionScore', label: 'Score' },
   { key: 'status', label: 'Status' },
   { key: null, label: 'Actions' },
 ];
@@ -170,6 +170,7 @@ export function PlayerTable({
                     className={cn('cursor-pointer', player.banned && 'bg-destructive/10 text-muted-foreground hover:bg-destructive/15')}
                     onClick={() => setExpanded((value) => (value === player.steamId ? null : player.steamId))}
                   >
+                    <TableCell className="font-medium tabular-nums">{player.eligible ? Math.round(player.suspicionScore) : '—'}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1.5 font-medium">
                         {player.name}
@@ -188,7 +189,6 @@ export function PlayerTable({
                     <TableCell className="tabular-nums">{pct(player.headshotKillRate)}</TableCell>
                     <TableCell className="tabular-nums">{ms(player.nonAwpTtdWeightedMs, player.nonAwpTtdSamples)}</TableCell>
                     <TableCell className="tabular-nums">{ms(player.nonAwpReactionWeightedMs, player.nonAwpReactionSamples)}</TableCell>
-                    <TableCell className="font-medium tabular-nums">{player.eligible ? Math.round(player.suspicionScore) : '—'}</TableCell>
                     <TableCell>
                       <Badge variant={statusVariant(player.status)}>{STATUS_LABEL[player.status]}</Badge>
                     </TableCell>
