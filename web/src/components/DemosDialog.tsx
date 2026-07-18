@@ -128,7 +128,7 @@ export function DemosDialog({ demos, onChanged }: { demos: Demo[]; onChanged: ()
           {message ? <p className={cn('border-b border-border px-6 py-2 text-sm', failed ? 'text-destructive' : 'text-muted-foreground')}>{message}</p> : null}
 
           {demos.length ? (
-            <div className="cheat-sheet-scroll mx-6 mb-6 mt-4 min-h-0 flex-1 overflow-auto rounded-lg border border-border">
+            <div className="cheat-sheet-scroll min-h-0 flex-1 overflow-auto">
               <Table className="min-w-[920px]">
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
