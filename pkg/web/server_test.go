@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/akiver/cs-demo-analyzer/pkg/api"
 )
 
 func TestHealthAndEmptyReport(t *testing.T) {
@@ -25,6 +27,49 @@ func TestHealthAndEmptyReport(t *testing.T) {
 		if response.Code != http.StatusOK {
 			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestThresholdsGetAndPut(t *testing.T) {
+	server := newTestServer(t)
+
+	response := do(server, http.MethodGet, "/api/thresholds", nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Current  api.SuspicionConfig `json:"current"`
+		Defaults api.SuspicionConfig `json:"defaults"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Current != api.DefaultSuspicionConfig() || payload.Defaults != api.DefaultSuspicionConfig() {
+		t.Fatalf("unexpected thresholds: %+v", payload)
+	}
+
+	updated := payload.Current
+	updated.MinimumDemos = 5
+	body, err := json.Marshal(updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response = do(server, http.MethodPut, "/api/thresholds", body)
+	if response.Code != http.StatusOK {
+		t.Fatalf("put status=%d body=%s", response.Code, response.Body.String())
+	}
+	server.configMu.RLock()
+	got := server.options.Config
+	server.configMu.RUnlock()
+	if got.MinimumDemos != 5 {
+		t.Fatalf("minimum demos=%d, want 5", got.MinimumDemos)
+	}
+
+	updated.TTDCheaterMS = updated.TTDSuspiciousMS
+	body, _ = json.Marshal(updated)
+	response = do(server, http.MethodPut, "/api/thresholds", body)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid put status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

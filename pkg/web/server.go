@@ -123,6 +123,7 @@ type Server struct {
 	options     Options
 	mux         *http.ServeMux
 	mu          sync.RWMutex
+	configMu    sync.RWMutex
 	uploadsMu   sync.Mutex
 	jobs        map[string]*Job
 	queue       chan string
@@ -193,6 +194,8 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/report", s.handleReport)
+	s.mux.HandleFunc("GET /api/thresholds", s.handleThresholdsGet)
+	s.mux.HandleFunc("PUT /api/thresholds", s.handleThresholdsPut)
 	s.mux.HandleFunc("GET /api/jobs", s.handleJobs)
 	s.mux.HandleFunc("GET /api/events", s.handleEvents)
 	s.mux.HandleFunc("DELETE /api/jobs/{id}", s.handleJobDelete)
@@ -218,12 +221,43 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
-	report, err := api.GetPlayerStatsReport(r.Context(), api.PlayerStatsReportOptions{DatabasePath: s.options.DatabasePath, Config: s.options.Config})
+	s.configMu.RLock()
+	config := s.options.Config
+	s.configMu.RUnlock()
+	report, err := api.GetPlayerStatsReport(r.Context(), api.PlayerStatsReportOptions{DatabasePath: s.options.DatabasePath, Config: config})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, report)
+}
+
+func (s *Server) handleThresholdsGet(w http.ResponseWriter, _ *http.Request) {
+	s.configMu.RLock()
+	config := s.options.Config
+	s.configMu.RUnlock()
+	writeJSON(w, http.StatusOK, map[string]api.SuspicionConfig{
+		"current":  config,
+		"defaults": api.DefaultSuspicionConfig(),
+	})
+}
+
+func (s *Server) handleThresholdsPut(w http.ResponseWriter, r *http.Request) {
+	var config api.SuspicionConfig
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 64<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&config); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid thresholds: " + err.Error()})
+		return
+	}
+	if err := api.ValidateSuspicionConfig(config); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.configMu.Lock()
+	s.options.Config = config
+	s.configMu.Unlock()
+	writeJSON(w, http.StatusOK, config)
 }
 
 func publicJob(job *Job) Job {

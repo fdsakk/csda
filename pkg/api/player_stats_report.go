@@ -16,11 +16,8 @@ import (
 	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
 )
 
-// PlayerSuspicionRule is a single informational signal shown in the expanded
-// row (e.g. lots of smoke kills). Signals no longer carry points — the status
-// tier comes from the TTD heuristic in flagPlayer, not from summing these.
-// Tier is "watch" or "cheater" when the signal itself decides the status,
-// or "info" for context-only signals (smoke/wall kills, unspotted damage).
+// PlayerSuspicionRule records a watch or cheater signal that contributed to
+// the player's final status. Signals do not carry points; the worst tier wins.
 type PlayerSuspicionRule struct {
 	Name   string  `json:"name"`
 	Value  float64 `json:"value"`
@@ -392,8 +389,7 @@ func promote(current, next string) string {
 //
 // Non-AWP reaction time (see→first shot) below ~200 ms as an average is a
 // trigger/aimbot signal. Head-hit-rate flags on its own at very high,
-// well-sampled values. Smoke/wall kills and unspotted damage are kept as
-// context-only signals — they colour nothing by themselves.
+// well-sampled values.
 func flagPlayer(row *PlayerStatsReportRow, config SuspicionConfig) {
 	row.Eligible = row.DemoCount >= config.MinimumDemos && row.Shots >= config.MinimumShots
 	if !row.Eligible {
@@ -452,14 +448,6 @@ func flagPlayer(row *PlayerStatsReportRow, config SuspicionConfig) {
 		}
 	}
 
-	// Context-only signals — surfaced in the expanded row, colour nothing.
-	combinedSpecialKills := row.SmokeKills + row.WallKills
-	if combinedSpecialKills > 0 {
-		row.TriggeredRules = append(row.TriggeredRules, PlayerSuspicionRule{Name: "smoke_wall_kills", Value: float64(combinedSpecialKills), Sample: row.Kills, Tier: "info"})
-	}
-	if row.DamageEvents > 0 && row.UnspottedDamageRate > 0 {
-		row.TriggeredRules = append(row.TriggeredRules, PlayerSuspicionRule{Name: "unspotted_damage", Value: row.UnspottedDamageRate, Sample: row.DamageEvents, Tier: "info"})
-	}
 }
 
 func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOptions) (*PlayerStatsReport, error) {

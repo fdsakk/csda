@@ -79,6 +79,24 @@ func TestFlagPlayerRequiresMinimumSample(t *testing.T) {
 	}
 }
 
+func TestValidateSuspicionConfig(t *testing.T) {
+	config := DefaultSuspicionConfig()
+	if err := ValidateSuspicionConfig(config); err != nil {
+		t.Fatalf("default config is invalid: %v", err)
+	}
+
+	config.TTDCheaterMS = config.TTDSuspiciousMS
+	if err := ValidateSuspicionConfig(config); err == nil {
+		t.Fatal("expected overlapping rifle TTD bands to be rejected")
+	}
+
+	config = DefaultSuspicionConfig()
+	config.HeadHitWatchThreshold = 1.1
+	if err := ValidateSuspicionConfig(config); err == nil {
+		t.Fatal("expected rate above 1 to be rejected")
+	}
+}
+
 func TestFlagPlayerTiers(t *testing.T) {
 	config := DefaultSuspicionConfig()
 	base := PlayerStatsReportRow{DemoCount: 3, Shots: 100, NonAWPTTDSamples: 20, Kills: 10, Deaths: 20, Accuracy: .15, HeadHitRate: .20}

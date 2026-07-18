@@ -57,8 +57,8 @@ const COLUMNS: { key: SortKey | null; label: string }[] = [
   { key: 'accuracy', label: 'Accuracy' },
   { key: 'headHitRate', label: 'Head hit' },
   { key: 'headshotKillRate', label: 'HS kills' },
-  { key: 'nonAwpTtdWeightedMs', label: 'TTD (rifle)' },
-  { key: 'nonAwpReactionWeightedMs', label: 'Reaction (rifle)' },
+  { key: 'nonAwpTtdWeightedMs', label: 'TTD' },
+  { key: 'nonAwpReactionWeightedMs', label: 'Reaction' },
   { key: 'status', label: 'Status' },
   { key: null, label: 'Actions' },
 ];

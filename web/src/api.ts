@@ -1,4 +1,21 @@
-export type Rule = { name: string; value: number; sample: number; tier: 'watch' | 'cheater' | 'info' };
+export type Rule = { name: string; value: number; sample: number; tier: 'watch' | 'cheater' };
+
+export type SuspicionConfig = {
+  minimumDemos: number;
+  minimumShots: number;
+  ttdMinimumSamples: number;
+  ttdCheaterMs: number;
+  ttdSuspiciousMs: number;
+  reactionCheaterMs: number;
+  awpTtdCheaterMs: number;
+  awpTtdWatchMs: number;
+  eliteKd: number;
+  eliteHeadHitRate: number;
+  eliteAccuracy: number;
+  headHitMinimumEvents: number;
+  headHitWatchThreshold: number;
+  headHitCheaterThreshold: number;
+};
 
 export type Player = {
   steamId: string;
@@ -131,6 +148,14 @@ function patchJSON(body: unknown): RequestInit {
 
 export function getReport(): Promise<Report> {
   return request<Report>('/api/report');
+}
+
+export function getThresholds(): Promise<{ current: SuspicionConfig; defaults: SuspicionConfig }> {
+  return request('/api/thresholds');
+}
+
+export function setThresholds(config: SuspicionConfig): Promise<SuspicionConfig> {
+  return request('/api/thresholds', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) });
 }
 
 export function getJobs(): Promise<Job[]> {

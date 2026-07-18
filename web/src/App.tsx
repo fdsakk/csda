@@ -7,6 +7,7 @@ import { DemosDialog } from '@/components/DemosDialog';
 import { Dropzone } from '@/components/Dropzone';
 import { JobsList } from '@/components/JobsList';
 import { PlayerTable } from '@/components/PlayerTable';
+import { ThresholdsDialog } from '@/components/ThresholdsDialog';
 
 const EMPTY_REPORT: Report = { players: [], playersByWeapon: [], importedDemos: [] };
 
@@ -79,6 +80,7 @@ export default function App() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setGuideOpen(true)}><BookOpen className="size-4" /> Cheat sheet</Button>
+          {!loading ? <ThresholdsDialog onChanged={() => void loadAll()} /> : null}
           {!loading ? <DemosDialog demos={report.importedDemos ?? []} onChanged={() => void loadAll()} /> : null}
         </div>
       </div>

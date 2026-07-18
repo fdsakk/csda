@@ -1,5 +1,5 @@
 import { ExternalLink } from 'lucide-react';
-import { Player, PlayerWeapon, Rule } from '@/api';
+import { Player, PlayerWeapon } from '@/api';
 import { ms, number, pct } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -90,14 +90,11 @@ const RULE_LABEL: Record<string, string> = {
   awp_ttd_low: 'Low AWP time-to-damage',
   reaction_impossible: 'Rifle reaction below human floor',
   head_hit_rate: 'Head hit rate',
-  smoke_wall_kills: 'Smoke / wall kills',
-  unspotted_damage: 'Unspotted damage',
 };
 
 export function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWeapon[] }) {
   const rules = player.triggeredRules ?? [];
   const flagSignals = rules.filter((rule) => rule.tier === 'watch' || rule.tier === 'cheater');
-  const infoSignals = rules.filter((rule) => rule.tier === 'info');
   const accuracyWeapons = weapons
     .filter((weapon) => weapon.weaponName && weapon.shots >= 10)
     .toSorted((a, b) => b.shots - a.shots)
@@ -223,40 +220,26 @@ export function PlayerDetails({ player, weapons }: { player: Player; weapons: Pl
               <span className="text-sm font-medium tabular-nums">{value}</span>
             </div>
           ))}
+          {flagSignals.length ? (
+            <div className="col-span-2 flex flex-wrap gap-2 border-t border-border pt-3">
+              {flagSignals.map((rule) => (
+                <span
+                  key={rule.name}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs',
+                    rule.tier === 'cheater'
+                      ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                      : 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400',
+                  )}
+                >
+                  <span className="font-medium">{RULE_LABEL[rule.name] ?? rule.name.replaceAll('_', ' ')}</span>
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
       </div>
 
-      <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
-        <span className="text-xs font-medium text-foreground">Triggered signals</span>
-        {flagSignals.length ? (
-          <div className="flex flex-wrap gap-2">
-            {flagSignals.map((rule) => (
-              <span
-                key={rule.name}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs',
-                  rule.tier === 'cheater'
-                    ? 'border-destructive/40 bg-destructive/10 text-destructive'
-                    : 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400',
-                )}
-              >
-                <span className="font-medium">{RULE_LABEL[rule.name] ?? rule.name.replaceAll('_', ' ')}</span>
-              </span>
-            ))}
-          </div>
-        ) : (
-          <span className="text-sm text-muted-foreground">No suspicious signals.</span>
-        )}
-        {infoSignals.length ? (
-          <div className="flex flex-wrap gap-2 border-t border-border pt-2">
-            {infoSignals.map((rule) => (
-              <span key={rule.name} className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-                {RULE_LABEL[rule.name] ?? rule.name.replaceAll('_', ' ')}
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </div>
     </div>
   );
 }

@@ -109,6 +109,40 @@ func DefaultSuspicionConfig() SuspicionConfig {
 	}
 }
 
+// ValidateSuspicionConfig rejects values that would make the flagging bands
+// ambiguous or impossible to reach.
+func ValidateSuspicionConfig(config SuspicionConfig) error {
+	if config.MinimumDemos < 1 || config.MinimumShots < 1 || config.TTDMinimumSamples < 1 || config.HeadHitMinimumEvents < 1 {
+		return errors.New("minimum sample counts must be at least 1")
+	}
+	if config.TTDCheaterMS <= 0 || config.TTDSuspiciousMS <= 0 || config.ReactionCheaterMS <= 0 || config.AWPTTDCheaterMS <= 0 || config.AWPTTDWatchMS <= 0 {
+		return errors.New("timing thresholds must be greater than 0")
+	}
+	if config.TTDCheaterMS >= config.TTDSuspiciousMS {
+		return errors.New("rifle cheater TTD must be lower than watch TTD")
+	}
+	if config.AWPTTDCheaterMS >= config.AWPTTDWatchMS {
+		return errors.New("AWP cheater TTD must be lower than watch TTD")
+	}
+	if config.EliteKD <= 0 {
+		return errors.New("elite K/D must be greater than 0")
+	}
+	for name, value := range map[string]float64{
+		"elite head-hit rate":        config.EliteHeadHitRate,
+		"elite accuracy":             config.EliteAccuracy,
+		"head-hit watch threshold":   config.HeadHitWatchThreshold,
+		"head-hit cheater threshold": config.HeadHitCheaterThreshold,
+	} {
+		if value < 0 || value > 1 {
+			return fmt.Errorf("%s must be between 0 and 1", name)
+		}
+	}
+	if config.HeadHitWatchThreshold >= config.HeadHitCheaterThreshold {
+		return errors.New("head-hit watch threshold must be lower than cheater threshold")
+	}
+	return nil
+}
+
 type PlayerStatsReportOptions struct {
 	DatabasePath string
 	OutputPath   string
