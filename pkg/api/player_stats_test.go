@@ -48,9 +48,10 @@ func TestFlagPlayerTiers(t *testing.T) {
 		want   string
 	}{
 		{"ttd below cheater line", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 300 }, "cheater"},
-		{"ttd suspicious with mediocre stats", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 360 }, "watch"},
-		{"ttd suspicious with elite kd", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 360; r.Kills, r.Deaths = 20, 10 }, "cheater"},
-		{"ttd suspicious with elite head accuracy", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 360; r.DamageEvents, r.HeadHitRate = 30, .42 }, "cheater"},
+		{"ttd suspicious with mediocre stats", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 350 }, "watch"},
+		{"ttd suspicious with elite kd", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 350; r.Kills, r.Deaths = 20, 10 }, "cheater"},
+		{"ttd suspicious with elite head accuracy", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 350; r.DamageEvents, r.HeadHitRate = 30, .42 }, "cheater"},
+		{"ttd above suspicious band is normal", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 360 }, "normal"},
 		{"healthy ttd", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 500 }, "normal"},
 		{"reaction below human floor", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 500; r.ReactionSamples, r.ReactionWeightedMS = 20, 180 }, "cheater"},
 		{"head hit rate watch", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 500; r.DamageEvents, r.HeadHitRate = 40, .52 }, "watch"},

@@ -1003,7 +1003,7 @@ function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
           </GuideSection>
 
           <GuideSection title="Exposure and response">
-            <GuideItem term="TTD">Time from first spotted tick to first damage, as a round-weighted long-term average. Rough bands: 450+ ms healthy, 400–450 elite, 320–400 suspicious (yellow, red when the player also frags hard), under 320 ms not humanly reproducible over many games (red). `p10` in details is the fast 10% tail.</GuideItem>
+            <GuideItem term="TTD">Time from first spotted tick to first damage, as a round-weighted long-term average. Rough bands: 360+ ms normal, 320–360 suspicious (yellow, red when the player also frags hard — K/D ≥ 1.8, head-acc ≥ 40% or acc ≥ 30%), under 320 ms not humanly reproducible over many games (red). `p10` in details is the fast 10% tail.</GuideItem>
             <GuideItem term="AWPer">Players with at least 5 AWP kills and at least 25% of all kills made with the AWP. Their details split AWP TTD from non-AWP TTD for a fairer comparison with riflers.</GuideItem>
             <GuideItem term="Reaction">Time from first spotted tick to first shot. It is a demo-derived estimate, not a laboratory reaction-time test; pre-aim, sound cues and prediction affect it.</GuideItem>
             <GuideItem term="Crosshair @ exposure">Median angular distance from crosshair to opponent at confirmed exposure. Lower means stronger crosshair placement, not cheating by itself.</GuideItem>
