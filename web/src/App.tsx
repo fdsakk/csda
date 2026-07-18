@@ -1,6 +1,6 @@
 import { DragEvent, Fragment, type ReactNode, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Ban, BookOpen, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FileUp, Film, ListFilter, Search, Trash2, Upload, X } from 'lucide-react';
-import { deleteDemo, Demo, getJobs, getReport, importStats, Job, Player, PlayerWeapon, Report, setDemoEnabled, setPlayerBanned, setPlayerSaved, uploadDemos } from './api';
+import { deleteDemo, Demo, getJobs, getReport, importStats, Job, Player, PlayerWeapon, Report, Rule, setDemoEnabled, setPlayerBanned, setPlayerSaved, uploadDemos } from './api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -9,18 +9,18 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
-type SortKey = 'suspicionScore' | 'name' | 'demoCount' | 'shots' | 'kills' | 'deaths' | 'accuracy' | 'headHitRate' | 'headshotKillRate' | 'ttdWeightedMs' | 'reactionWeightedMs';
+type SortKey = 'status' | 'name' | 'demoCount' | 'shots' | 'kills' | 'deaths' | 'accuracy' | 'headHitRate' | 'headshotKillRate' | 'ttdWeightedMs' | 'reactionWeightedMs';
 type StatusFilter = 'all' | 'flagged' | Player['status'];
 
 const EMPTY_REPORT: Report = { players: [], playersByWeapon: [], evidence: [], importedDemos: [] };
 const number = new Intl.NumberFormat('en-US');
-const FLAGGED = ['watch', 'review', 'critical'];
+const FLAGGED = ['watch', 'cheater'];
+const STATUS_RANK: Record<Player['status'], number> = { cheater: 3, watch: 2, normal: 1, insufficient_sample: 0 };
 
 const STATUS_LABEL: Record<Player['status'], string> = {
   normal: 'Normal',
   watch: 'Watch',
-  review: 'Review',
-  critical: 'Critical',
+  cheater: 'Cheater',
   insufficient_sample: 'Low sample',
 };
 
@@ -28,7 +28,7 @@ function pct(value: number) { return `${(value * 100).toFixed(1)}%`; }
 function ms(value: number, samples: number) { return samples ? `${Math.round(value)} ms` : '—'; }
 
 function statusVariant(status: Player['status']) {
-  if (status === 'review' || status === 'critical') return 'destructive' as const;
+  if (status === 'cheater') return 'destructive' as const;
   if (status === 'watch') return 'warning' as const;
   if (status === 'insufficient_sample') return 'outline' as const;
   return 'default' as const;
@@ -219,8 +219,26 @@ function BarRow({ label, detail, value, color, reference }: { label: string; det
   );
 }
 
+const RULE_LABEL: Record<string, string> = {
+  ttd_impossible: 'Time-to-damage impossibly low',
+  ttd_low_elite_stats: 'Low TTD + elite fragging',
+  ttd_low: 'Low time-to-damage',
+  reaction_impossible: 'Reaction below human floor',
+  head_hit_rate: 'Head hit rate',
+  smoke_wall_kills: 'Smoke / wall kills',
+  unspotted_damage: 'Unspotted damage',
+};
+
+function formatRuleValue(rule: Rule) {
+  if (rule.name.startsWith('ttd') || rule.name.startsWith('reaction')) return `${Math.round(rule.value)} ms`;
+  if (rule.name === 'smoke_wall_kills') return `${Math.round(rule.value)} kills`;
+  return `${(rule.value * 100).toFixed(1)}%`;
+}
+
 function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWeapon[] }) {
   const rules = player.triggeredRules ?? [];
+  const flagSignals = rules.filter((rule) => rule.tier === 'watch' || rule.tier === 'cheater');
+  const infoSignals = rules.filter((rule) => rule.tier === 'info');
   const accuracyWeapons = weapons
     .filter((weapon) => weapon.weaponName && weapon.shots >= 10)
     .toSorted((a, b) => b.shots - a.shots)
@@ -351,19 +369,36 @@ function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWea
 
       <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
         <span className="text-xs font-medium text-foreground">Triggered signals</span>
-        {rules.length ? (
+        {flagSignals.length ? (
           <div className="flex flex-wrap gap-2">
-            {rules.map((rule) => (
-              <span key={rule.name} className="flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs">
-                {rule.name.replaceAll('_', ' ')}
-                <span className="font-medium text-destructive">+{rule.points}</span>
-                <span className="text-muted-foreground">{rule.value.toFixed(2)} · n={rule.sample}</span>
+            {flagSignals.map((rule) => (
+              <span
+                key={rule.name}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs',
+                  rule.tier === 'cheater'
+                    ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                    : 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400',
+                )}
+              >
+                <span className="font-medium">{RULE_LABEL[rule.name] ?? rule.name.replaceAll('_', ' ')}</span>
+                <span className="opacity-80">{formatRuleValue(rule)} · n={rule.sample}</span>
               </span>
             ))}
           </div>
         ) : (
-          <span className="text-sm text-muted-foreground">No scoring rules triggered.</span>
+          <span className="text-sm text-muted-foreground">No suspicious signals.</span>
         )}
+        {infoSignals.length ? (
+          <div className="flex flex-wrap gap-2 border-t border-border pt-2">
+            {infoSignals.map((rule) => (
+              <span key={rule.name} className="flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                {RULE_LABEL[rule.name] ?? rule.name.replaceAll('_', ' ')}
+                <span>{formatRuleValue(rule)}{rule.sample ? ` · n=${rule.sample}` : ''}</span>
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -458,8 +493,7 @@ function ThresholdSelect({
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'All statuses' },
   { value: 'flagged', label: 'Flagged only' },
-  { value: 'critical', label: 'Critical' },
-  { value: 'review', label: 'Review' },
+  { value: 'cheater', label: 'Cheater' },
   { value: 'watch', label: 'Watch' },
   { value: 'normal', label: 'Normal' },
   { value: 'insufficient_sample', label: 'Low sample' },
@@ -525,7 +559,7 @@ const COLUMNS: { key: SortKey | null; label: string }[] = [
   { key: 'headshotKillRate', label: 'HS kills' },
   { key: 'ttdWeightedMs', label: 'TTD' },
   { key: 'reactionWeightedMs', label: 'Reaction' },
-  { key: 'suspicionScore', label: 'Status' },
+  { key: 'status', label: 'Status' },
   { key: null, label: 'Actions' },
 ];
 
@@ -545,7 +579,7 @@ function PlayerTable({
   const [filters, setFilters] = useState<TableFilters>(DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [pageSize, setPageSize] = useState(12);
-  const [sortKey, setSortKey] = useState<SortKey>('suspicionScore');
+  const [sortKey, setSortKey] = useState<SortKey>('status');
   const [ascending, setAscending] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [page, setPage] = useState(0);
@@ -557,9 +591,13 @@ function PlayerTable({
       return matchesText && matchesFilters(player, filters);
     }).toSorted((a, b) => {
       // saved players pin to the top only under the default (status) sort
-      if (sortKey === 'suspicionScore' && a.saved !== b.saved) return a.saved ? -1 : 1;
-      const av = a[sortKey], bv = b[sortKey];
-      const order = typeof av === 'string' ? av.localeCompare(String(bv)) : Number(av) - Number(bv);
+      if (sortKey === 'status' && a.saved !== b.saved) return a.saved ? -1 : 1;
+      const order = sortKey === 'status'
+        ? STATUS_RANK[a.status] - STATUS_RANK[b.status]
+        : (() => {
+            const av = a[sortKey], bv = b[sortKey];
+            return typeof av === 'string' ? av.localeCompare(String(bv)) : Number(av) - Number(bv);
+          })();
       return ascending ? order : -order;
     });
   }, [players, deferredQuery, filters, sortKey, ascending]);
@@ -952,7 +990,7 @@ function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
         </header>
         <div className="cheat-sheet-scroll min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
           <GuideSection title="Start here">
-            <GuideItem term="Status">A review priority, not proof. Start with `Watch`, `Review` or `Critical`, then expand the row and inspect the triggered signals.</GuideItem>
+            <GuideItem term="Status">A review priority, not proof. `Cheater` (red) marks stats that are not humanly reproducible over many games; `Watch` (yellow) is a grey-zone flag. Always expand the row and inspect the triggered signals before judging.</GuideItem>
             <GuideItem term="Samples">Check the number of demos, shots and sample count (`n=`). A small sample can make an ordinary streak look extreme.</GuideItem>
             <GuideItem term="Workflow">Use the table to find a player, open their row, note multiple independent signals, then review the relevant rounds in the demo.</GuideItem>
           </GuideSection>
@@ -965,7 +1003,7 @@ function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
           </GuideSection>
 
           <GuideSection title="Exposure and response">
-            <GuideItem term="TTD">Time from first spotted tick to first damage. The table shows a round-weighted median; `p10` in details is the fast 10% tail. Repeated low TTD is more relevant than one fast duel.</GuideItem>
+            <GuideItem term="TTD">Time from first spotted tick to first damage, as a round-weighted long-term average. Rough bands: 450+ ms healthy, 400–450 elite, 320–400 suspicious (yellow, red when the player also frags hard), under 320 ms not humanly reproducible over many games (red). `p10` in details is the fast 10% tail.</GuideItem>
             <GuideItem term="AWPer">Players with at least 5 AWP kills and at least 25% of all kills made with the AWP. Their details split AWP TTD from non-AWP TTD for a fairer comparison with riflers.</GuideItem>
             <GuideItem term="Reaction">Time from first spotted tick to first shot. It is a demo-derived estimate, not a laboratory reaction-time test; pre-aim, sound cues and prediction affect it.</GuideItem>
             <GuideItem term="Crosshair @ exposure">Median angular distance from crosshair to opponent at confirmed exposure. Lower means stronger crosshair placement, not cheating by itself.</GuideItem>
@@ -976,7 +1014,7 @@ function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
             <GuideItem term="Unspotted damage">Damage where the analyzer did not have a confirmed spotted state. Check the demo for sound, teammate information, wallbang lines, smokes and replay limitations before judging it.</GuideItem>
             <GuideItem term="First-bullet head / snap">Signals around unusually accurate first shots and fast aim reduction. They are strongest when repeated over many encounters and paired with unusual TTD or reactions.</GuideItem>
             <GuideItem term="Smoke / wall kills">Useful review context, but legitimate wallbangs and common angles are expected in Counter-Strike. Look for repetition and timing, not isolated kills.</GuideItem>
-            <GuideItem term="Triggered signals">Each badge in the expanded row states the rule, points and `n=` sample count that contributed to the status.</GuideItem>
+            <GuideItem term="Triggered signals">Coloured badges (red = cheater, yellow = watch) are the signals that set the status; grey badges below them are context only (smoke/wall kills, unspotted damage) and colour nothing. Each states its value and `n=` sample count.</GuideItem>
           </GuideSection>
 
           <GuideSection title="Saved players and demos">

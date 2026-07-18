@@ -1,4 +1,4 @@
-export type Rule = { name: string; value: number; sample: number; points: number };
+export type Rule = { name: string; value: number; sample: number; tier: 'watch' | 'cheater' | 'info' };
 
 export type Player = {
   steamId: string;
@@ -52,8 +52,7 @@ export type Player = {
   saved: boolean;
   banned: boolean;
   eligible: boolean;
-  suspicionScore: number;
-  status: 'normal' | 'watch' | 'review' | 'critical' | 'insufficient_sample';
+  status: 'normal' | 'watch' | 'cheater' | 'insufficient_sample';
   triggeredRules: Rule[] | null;
 };
 

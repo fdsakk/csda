@@ -15,11 +15,16 @@ import (
 	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
 )
 
+// PlayerSuspicionRule is a single informational signal shown in the expanded
+// row (e.g. lots of smoke kills). Signals no longer carry points — the status
+// tier comes from the TTD heuristic in flagPlayer, not from summing these.
+// Tier is "watch" or "cheater" when the signal itself decides the status,
+// or "info" for context-only signals (smoke/wall kills, unspotted damage).
 type PlayerSuspicionRule struct {
 	Name   string  `json:"name"`
 	Value  float64 `json:"value"`
 	Sample int     `json:"sample"`
-	Points int     `json:"points"`
+	Tier   string  `json:"tier"`
 }
 
 type PlayerStatsReportRow struct {
@@ -80,7 +85,6 @@ type PlayerStatsReportRow struct {
 	Saved                bool                  `json:"saved"`
 	Banned               bool                  `json:"banned"`
 	Eligible             bool                  `json:"eligible"`
-	SuspicionScore       int                   `json:"suspicionScore"`
 	Status               string                `json:"status"`
 	TriggeredRules       []PlayerSuspicionRule `json:"triggeredRules"`
 }
@@ -215,50 +219,84 @@ func roundWeightedDemoMedian(groups map[int64]*demoSamples) float64 {
 	return weighted / float64(rounds)
 }
 
-func scorePlayer(row *PlayerStatsReportRow, config SuspicionConfig) {
+// promote keeps the worst tier seen so far. cheater > watch > normal.
+func promote(current, next string) string {
+	rank := map[string]int{"normal": 0, "watch": 1, "cheater": 2}
+	if rank[next] > rank[current] {
+		return next
+	}
+	return current
+}
+
+// flagPlayer assigns a two-tier status (watch = yellow, cheater = red) from a
+// small set of hard heuristics, and records the signals it saw for the UI.
+//
+// Time-to-damage is read as a long-term average across many games:
+//
+//	 700+ ms   weak         | normal
+//	 400-700   ok..elite    | normal
+//	 320-400   suspicious   | watch, or cheater if the player is also fragging
+//	                          hard (K/D, head-accuracy or accuracy elite)
+//	 < 320     not humanly reproducible over many games | cheater
+//
+// A reaction time (see→first shot) below ~200 ms as an average is likewise
+// treated as a trigger/aimbot signal. Head-hit-rate flags on its own at very
+// high, well-sampled values. Smoke/wall kills and unspotted damage are kept as
+// context-only signals — they colour nothing by themselves.
+func flagPlayer(row *PlayerStatsReportRow, config SuspicionConfig) {
 	row.Eligible = row.DemoCount >= config.MinimumDemos && row.Shots >= config.MinimumShots
 	if !row.Eligible {
 		row.Status = "insufficient_sample"
 		return
 	}
-	add := func(name string, value float64, sample, points int) {
-		row.SuspicionScore += points
-		row.TriggeredRules = append(row.TriggeredRules, PlayerSuspicionRule{Name: name, Value: value, Sample: sample, Points: points})
+	row.Status = "normal"
+	signal := func(name string, value float64, sample int, tier string) {
+		row.Status = promote(row.Status, tier)
+		row.TriggeredRules = append(row.TriggeredRules, PlayerSuspicionRule{Name: name, Value: value, Sample: sample, Tier: tier})
 	}
-	if row.TTDSamples >= config.TTDMinimumSamples && row.TTDWeightedMS <= config.TTDThresholdMS {
-		add("ttd_weighted", row.TTDWeightedMS, row.TTDSamples, config.TTDPoints)
+
+	kd := ratio(row.Kills, row.Deaths)
+	if row.Deaths == 0 && row.Kills > 0 {
+		kd = float64(row.Kills)
 	}
-	if row.TTDSamples >= config.TTDMinimumSamples && row.TTDP10MS <= config.TTDP10ThresholdMS {
-		add("ttd_p10", row.TTDP10MS, row.TTDSamples, config.TTDP10Points)
+	eliteStats := kd >= config.EliteKD || row.HeadHitRate >= config.EliteHeadHitRate || row.Accuracy >= config.EliteAccuracy
+
+	// Time-to-damage: the primary signal.
+	if row.TTDSamples >= config.TTDMinimumSamples && row.TTDWeightedMS > 0 {
+		switch {
+		case row.TTDWeightedMS < config.TTDCheaterMS:
+			signal("ttd_impossible", row.TTDWeightedMS, row.TTDSamples, "cheater")
+		case row.TTDWeightedMS < config.TTDSuspiciousMS:
+			if eliteStats {
+				signal("ttd_low_elite_stats", row.TTDWeightedMS, row.TTDSamples, "cheater")
+			} else {
+				signal("ttd_low", row.TTDWeightedMS, row.TTDSamples, "watch")
+			}
+		}
 	}
-	if row.DamageEvents >= config.HeadHitMinimumEvents && row.HeadHitRate >= config.HeadHitRateThreshold {
-		add("head_hit_rate", row.HeadHitRate, row.DamageEvents, config.HeadHitRatePoints)
+
+	// Reaction time (see → first shot) below human floor as an average.
+	if row.ReactionSamples >= config.TTDMinimumSamples && row.ReactionWeightedMS > 0 && row.ReactionWeightedMS < config.ReactionCheaterMS {
+		signal("reaction_impossible", row.ReactionWeightedMS, row.ReactionSamples, "cheater")
 	}
-	if row.FirstBulletEncounters >= config.FirstBulletMinimumEncounters && row.FirstBulletHeadRate >= config.FirstBulletHeadRateThreshold {
-		add("first_bullet_head_rate", row.FirstBulletHeadRate, row.FirstBulletEncounters, config.FirstBulletHeadRatePoints)
+
+	// Head-hit-rate standalone.
+	if row.DamageEvents >= config.HeadHitMinimumEvents {
+		switch {
+		case row.HeadHitRate >= config.HeadHitCheaterThreshold:
+			signal("head_hit_rate", row.HeadHitRate, row.DamageEvents, "cheater")
+		case row.HeadHitRate >= config.HeadHitWatchThreshold:
+			signal("head_hit_rate", row.HeadHitRate, row.DamageEvents, "watch")
+		}
 	}
-	if row.FirstBulletEncounters >= config.SnapMinimumEncounters && row.SnapRate >= config.SnapRateThreshold {
-		add("snap_rate", row.SnapRate, row.FirstBulletEncounters, config.SnapRatePoints)
-	}
-	if row.DamageEvents >= config.UnspottedMinimumEvents && row.UnspottedDamageRate >= config.UnspottedDamageRateThreshold {
-		add("damage_without_confirmed_spot", row.UnspottedDamageRate, row.DamageEvents, config.UnspottedDamageRatePoints)
-	}
+
+	// Context-only signals — surfaced in the expanded row, colour nothing.
 	combinedSpecialKills := row.SmokeKills + row.WallKills
-	if combinedSpecialKills >= config.SmokeWallMinimumKills && ratio(combinedSpecialKills, row.Kills) >= config.SmokeWallKillRateThreshold {
-		add("smoke_wall_kill_rate", ratio(combinedSpecialKills, row.Kills), row.Kills, config.SmokeWallKillRatePoints)
+	if combinedSpecialKills > 0 {
+		row.TriggeredRules = append(row.TriggeredRules, PlayerSuspicionRule{Name: "smoke_wall_kills", Value: float64(combinedSpecialKills), Sample: row.Kills, Tier: "info"})
 	}
-	if row.SuspicionScore > 100 {
-		row.SuspicionScore = 100
-	}
-	switch {
-	case row.SuspicionScore >= 70:
-		row.Status = "critical"
-	case row.SuspicionScore >= 50:
-		row.Status = "review"
-	case row.SuspicionScore >= 30:
-		row.Status = "watch"
-	default:
-		row.Status = "normal"
+	if row.DamageEvents > 0 && row.UnspottedDamageRate > 0 {
+		row.TriggeredRules = append(row.TriggeredRules, PlayerSuspicionRule{Name: "unspotted_damage", Value: row.UnspottedDamageRate, Sample: row.DamageEvents, Tier: "info"})
 	}
 }
 
@@ -390,7 +428,7 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 		if row.ReactionWeightedMS == 0 {
 			row.ReactionWeightedMS = row.ReactionMedianMS
 		}
-		scorePlayer(row, config)
+		flagPlayer(row, config)
 	}
 
 	weaponRows, err := db.QueryContext(ctx, `SELECT w.steam_id,p.latest_name,w.weapon_name,SUM(w.shots),SUM(w.hit_shots),SUM(w.damage_events),SUM(w.head_hit_events),SUM(w.kills) FROM player_demo_weapon_stats w JOIN players p ON p.steam_id=w.steam_id JOIN demos d ON d.id=w.demo_id AND d.enabled=1 GROUP BY w.steam_id,p.latest_name,w.weapon_name ORDER BY w.steam_id,w.weapon_name`)
@@ -510,13 +548,13 @@ func writeCSV(path string, lines [][]string) error {
 	return err
 }
 func writePlayersCSV(path string, rows []PlayerStatsReportRow) error {
-	lines := [][]string{{"steamid", "name", "aliases", "demos", "rounds", "shots", "hit shots", "accuracy", "damage events", "head hits", "head hit rate", "kills", "headshot kills", "headshot kill rate", "smoke kills", "wall kills", "unspotted damage rate", "first bullet head rate", "snap rate", "ttd samples", "ttd mean ms", "ttd pooled median ms", "ttd weighted ms", "ttd p10 ms", "ttd under 190 rate", "reaction samples", "reaction median ms", "reaction weighted ms", "reaction p10 ms", "crosshair median angle", "first shot median angle", "moving shots", "moving hit rate", "airborne shots", "airborne hit rate", "flashed shots", "flashed hit rate", "scoped shots", "scoped hit rate", "eligible", "suspicion score", "status", "triggered rules"}}
+	lines := [][]string{{"steamid", "name", "aliases", "demos", "rounds", "shots", "hit shots", "accuracy", "damage events", "head hits", "head hit rate", "kills", "headshot kills", "headshot kill rate", "smoke kills", "wall kills", "unspotted damage rate", "first bullet head rate", "snap rate", "ttd samples", "ttd mean ms", "ttd pooled median ms", "ttd weighted ms", "ttd p10 ms", "ttd under 190 rate", "reaction samples", "reaction median ms", "reaction weighted ms", "reaction p10 ms", "crosshair median angle", "first shot median angle", "moving shots", "moving hit rate", "airborne shots", "airborne hit rate", "flashed shots", "flashed hit rate", "scoped shots", "scoped hit rate", "eligible", "status", "triggered rules"}}
 	for _, r := range rows {
 		rules := make([]string, len(r.TriggeredRules))
 		for x, rule := range r.TriggeredRules {
-			rules[x] = fmt.Sprintf("%s:%d(sample=%d)", rule.Name, rule.Points, rule.Sample)
+			rules[x] = fmt.Sprintf("%s:%s(value=%.2f,sample=%d)", rule.Name, rule.Tier, rule.Value, rule.Sample)
 		}
-		lines = append(lines, []string{u(r.SteamID64), r.Name, strings.Join(r.Names, " | "), i(r.DemoCount), i(r.Rounds), i(r.Shots), i(r.HitShots), f(r.Accuracy), i(r.DamageEvents), i(r.HeadHitEvents), f(r.HeadHitRate), i(r.Kills), i(r.HeadshotKills), f(r.HeadshotKillRate), i(r.SmokeKills), i(r.WallKills), f(r.UnspottedDamageRate), f(r.FirstBulletHeadRate), f(r.SnapRate), i(r.TTDSamples), f(r.TTDMeanMS), f(r.TTDMedianMS), f(r.TTDWeightedMS), f(r.TTDP10MS), f(r.TTDUnder190Rate), i(r.ReactionSamples), f(r.ReactionMedianMS), f(r.ReactionWeightedMS), f(r.ReactionP10MS), f(r.CrosshairMedianAngle), f(r.FirstShotMedianAngle), i(r.MovingShots), f(r.MovingHitRate), i(r.AirborneShots), f(r.AirborneHitRate), i(r.FlashedShots), f(r.FlashedHitRate), i(r.ScopedShots), f(r.ScopedHitRate), strconv.FormatBool(r.Eligible), i(r.SuspicionScore), r.Status, strings.Join(rules, " | ")})
+		lines = append(lines, []string{u(r.SteamID64), r.Name, strings.Join(r.Names, " | "), i(r.DemoCount), i(r.Rounds), i(r.Shots), i(r.HitShots), f(r.Accuracy), i(r.DamageEvents), i(r.HeadHitEvents), f(r.HeadHitRate), i(r.Kills), i(r.HeadshotKills), f(r.HeadshotKillRate), i(r.SmokeKills), i(r.WallKills), f(r.UnspottedDamageRate), f(r.FirstBulletHeadRate), f(r.SnapRate), i(r.TTDSamples), f(r.TTDMeanMS), f(r.TTDMedianMS), f(r.TTDWeightedMS), f(r.TTDP10MS), f(r.TTDUnder190Rate), i(r.ReactionSamples), f(r.ReactionMedianMS), f(r.ReactionWeightedMS), f(r.ReactionP10MS), f(r.CrosshairMedianAngle), f(r.FirstShotMedianAngle), i(r.MovingShots), f(r.MovingHitRate), i(r.AirborneShots), f(r.AirborneHitRate), i(r.FlashedShots), f(r.FlashedHitRate), i(r.ScopedShots), f(r.ScopedHitRate), strconv.FormatBool(r.Eligible), r.Status, strings.Join(rules, " | ")})
 	}
 	return writeCSV(path, lines)
 }

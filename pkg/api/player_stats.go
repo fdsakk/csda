@@ -57,41 +57,47 @@ type PlayerStatsBuildResult struct {
 	Errors   []DemoImportError `json:"errors,omitempty"`
 }
 
+// SuspicionConfig holds the thresholds for the two-tier flagging heuristic
+// (watch = yellow, cheater = red). The tiers are driven by time-to-damage as a
+// long-term average, cross-checked against performance stats. There is no
+// numeric score any more — a player lands in the worst tier any rule triggers.
 type SuspicionConfig struct {
-	MinimumDemos                 int     `json:"minimumDemos"`
-	MinimumShots                 int     `json:"minimumShots"`
-	TTDMinimumSamples            int     `json:"ttdMinimumSamples"`
-	TTDThresholdMS               float64 `json:"ttdThresholdMs"`
-	TTDPoints                    int     `json:"ttdPoints"`
-	TTDP10ThresholdMS            float64 `json:"ttdP10ThresholdMs"`
-	TTDP10Points                 int     `json:"ttdP10Points"`
-	HeadHitMinimumEvents         int     `json:"headHitMinimumEvents"`
-	HeadHitRateThreshold         float64 `json:"headHitRateThreshold"`
-	HeadHitRatePoints            int     `json:"headHitRatePoints"`
-	FirstBulletMinimumEncounters int     `json:"firstBulletMinimumEncounters"`
-	FirstBulletHeadRateThreshold float64 `json:"firstBulletHeadRateThreshold"`
-	FirstBulletHeadRatePoints    int     `json:"firstBulletHeadRatePoints"`
-	SnapMinimumEncounters        int     `json:"snapMinimumEncounters"`
-	SnapRateThreshold            float64 `json:"snapRateThreshold"`
-	SnapRatePoints               int     `json:"snapRatePoints"`
-	UnspottedMinimumEvents       int     `json:"unspottedMinimumEvents"`
-	UnspottedDamageRateThreshold float64 `json:"unspottedDamageRateThreshold"`
-	UnspottedDamageRatePoints    int     `json:"unspottedDamageRatePoints"`
-	SmokeWallKillRateThreshold   float64 `json:"smokeWallKillRateThreshold"`
-	SmokeWallMinimumKills        int     `json:"smokeWallMinimumKills"`
-	SmokeWallKillRatePoints      int     `json:"smokeWallKillRatePoints"`
+	MinimumDemos      int `json:"minimumDemos"`
+	MinimumShots      int `json:"minimumShots"`
+	TTDMinimumSamples int `json:"ttdMinimumSamples"`
+
+	// Time-to-damage (weighted long-term average, ms). Below the cheater line
+	// the aim is not humanly reproducible over many games; the grey band above
+	// it only flags red when the supporting stats are also elite.
+	TTDCheaterMS       float64 `json:"ttdCheaterMs"`       // < this → cheater outright
+	TTDSuspiciousMS    float64 `json:"ttdSuspiciousMs"`    // < this → at least watch, cheater if stats elite
+	ReactionCheaterMS  float64 `json:"reactionCheaterMs"`  // reaction weighted avg below this → cheater
+
+	// "Elite supporting stats" — any one of these promotes a suspicious-band
+	// TTD (TTDCheaterMS..TTDSuspiciousMS) from watch to cheater.
+	EliteKD           float64 `json:"eliteKd"`
+	EliteHeadHitRate  float64 `json:"eliteHeadHitRate"`
+	EliteAccuracy     float64 `json:"eliteAccuracy"`
+
+	// Head-hit-rate standalone flags, gated by a minimum damage-event sample.
+	HeadHitMinimumEvents   int     `json:"headHitMinimumEvents"`
+	HeadHitWatchThreshold  float64 `json:"headHitWatchThreshold"`  // >= this → watch
+	HeadHitCheaterThreshold float64 `json:"headHitCheaterThreshold"` // >= this → cheater
 }
 
 func DefaultSuspicionConfig() SuspicionConfig {
 	return SuspicionConfig{
 		MinimumDemos: 3, MinimumShots: 100,
-		TTDMinimumSamples: 20, TTDThresholdMS: 190, TTDPoints: 25,
-		TTDP10ThresholdMS: 120, TTDP10Points: 10,
-		HeadHitMinimumEvents: 30, HeadHitRateThreshold: .40, HeadHitRatePoints: 20,
-		FirstBulletMinimumEncounters: 20, FirstBulletHeadRateThreshold: .25, FirstBulletHeadRatePoints: 15,
-		SnapMinimumEncounters: 20, SnapRateThreshold: .10, SnapRatePoints: 15,
-		UnspottedMinimumEvents: 20, UnspottedDamageRateThreshold: .15, UnspottedDamageRatePoints: 10,
-		SmokeWallKillRateThreshold: .10, SmokeWallMinimumKills: 3, SmokeWallKillRatePoints: 5,
+		TTDMinimumSamples: 20,
+		TTDCheaterMS:      320,
+		TTDSuspiciousMS:   400,
+		ReactionCheaterMS: 200,
+		EliteKD:           1.3,
+		EliteHeadHitRate:  .40,
+		EliteAccuracy:     .30,
+		HeadHitMinimumEvents:    30,
+		HeadHitWatchThreshold:   .50,
+		HeadHitCheaterThreshold: .60,
 	}
 }
 

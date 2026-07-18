@@ -29,24 +29,47 @@ func TestRoundWeightedDemoMedian(t *testing.T) {
 	}
 }
 
-func TestScorePlayerRequiresMinimumSampleAndIncludesThresholdBoundaries(t *testing.T) {
+func TestFlagPlayerRequiresMinimumSample(t *testing.T) {
 	config := DefaultSuspicionConfig()
-	row := PlayerStatsReportRow{DemoCount: 2, Shots: 99, TTDSamples: 20, TTDWeightedMS: 190, TTDP10MS: 120, DamageEvents: 30, HeadHitRate: .40}
-	scorePlayer(&row, config)
+	row := PlayerStatsReportRow{DemoCount: 2, Shots: 99, TTDSamples: 20, TTDWeightedMS: 300}
+	flagPlayer(&row, config)
 	if row.Eligible || row.Status != "insufficient_sample" {
 		t.Fatalf("unexpected eligibility: %+v", row)
 	}
+}
 
-	row.DemoCount, row.Shots = 3, 100
-	scorePlayer(&row, config)
-	if !row.Eligible {
-		t.Fatal("expected row to be eligible")
+func TestFlagPlayerTiers(t *testing.T) {
+	config := DefaultSuspicionConfig()
+	base := PlayerStatsReportRow{DemoCount: 3, Shots: 100, TTDSamples: 20, Kills: 10, Deaths: 20, Accuracy: .15, HeadHitRate: .20}
+
+	cases := []struct {
+		name   string
+		mutate func(*PlayerStatsReportRow)
+		want   string
+	}{
+		{"ttd below cheater line", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 300 }, "cheater"},
+		{"ttd suspicious with mediocre stats", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 360 }, "watch"},
+		{"ttd suspicious with elite kd", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 360; r.Kills, r.Deaths = 20, 10 }, "cheater"},
+		{"ttd suspicious with elite head accuracy", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 360; r.DamageEvents, r.HeadHitRate = 30, .42 }, "cheater"},
+		{"healthy ttd", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 500 }, "normal"},
+		{"reaction below human floor", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 500; r.ReactionSamples, r.ReactionWeightedMS = 20, 180 }, "cheater"},
+		{"head hit rate watch", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 500; r.DamageEvents, r.HeadHitRate = 40, .52 }, "watch"},
+		{"head hit rate cheater", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 500; r.DamageEvents, r.HeadHitRate = 40, .62 }, "cheater"},
+		{"insufficient ttd sample stays normal", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 300; r.TTDSamples = 5 }, "normal"},
 	}
-	if row.SuspicionScore != 55 {
-		t.Fatalf("score = %d, want 55", row.SuspicionScore)
-	}
-	if row.Status != "review" {
-		t.Fatalf("status = %q, want review", row.Status)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			row := base
+			row.TriggeredRules = nil
+			tc.mutate(&row)
+			flagPlayer(&row, config)
+			if !row.Eligible {
+				t.Fatal("expected eligible")
+			}
+			if row.Status != tc.want {
+				t.Fatalf("status = %q, want %q (%+v)", row.Status, tc.want, row)
+			}
+		})
 	}
 }
 
