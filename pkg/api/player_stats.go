@@ -66,12 +66,18 @@ type SuspicionConfig struct {
 	MinimumShots      int `json:"minimumShots"`
 	TTDMinimumSamples int `json:"ttdMinimumSamples"`
 
-	// Time-to-damage (weighted long-term average, ms). Below the cheater line
-	// the aim is not humanly reproducible over many games; the grey band above
-	// it only flags red when the supporting stats are also elite.
+	// Non-AWP time-to-damage (weighted long-term average, ms). Below the cheater
+	// line the aim is not humanly reproducible over many games; the grey band
+	// above it only flags red when the supporting stats are also elite. AWP
+	// kills are excluded — the AWP is a one-shot weapon and has its own tier.
 	TTDCheaterMS       float64 `json:"ttdCheaterMs"`       // < this → cheater outright
 	TTDSuspiciousMS    float64 `json:"ttdSuspiciousMs"`    // < this → at least watch, cheater if stats elite
-	ReactionCheaterMS  float64 `json:"reactionCheaterMs"`  // reaction weighted avg below this → cheater
+	ReactionCheaterMS  float64 `json:"reactionCheaterMs"`  // non-AWP reaction weighted avg below this → cheater
+
+	// AWP-only time-to-damage tier, applied to AWPers. Single flick + one-shot
+	// kill makes AWP TTD naturally lower, so it gets its own, lower thresholds.
+	AWPTTDCheaterMS float64 `json:"awpTtdCheaterMs"` // AWP TTD < this → cheater
+	AWPTTDWatchMS   float64 `json:"awpTtdWatchMs"`   // AWP TTD < this → watch
 
 	// "Elite supporting stats" — any one of these promotes a suspicious-band
 	// TTD (TTDCheaterMS..TTDSuspiciousMS) from watch to cheater.
@@ -92,6 +98,8 @@ func DefaultSuspicionConfig() SuspicionConfig {
 		TTDCheaterMS:      320,
 		TTDSuspiciousMS:   360,
 		ReactionCheaterMS: 200,
+		AWPTTDCheaterMS:   210,
+		AWPTTDWatchMS:     280,
 		EliteKD:           1.8,
 		EliteHeadHitRate:  .40,
 		EliteAccuracy:     .30,

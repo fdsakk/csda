@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
-type SortKey = 'status' | 'name' | 'demoCount' | 'shots' | 'kills' | 'deaths' | 'accuracy' | 'headHitRate' | 'headshotKillRate' | 'ttdWeightedMs' | 'reactionWeightedMs';
+type SortKey = 'status' | 'name' | 'demoCount' | 'shots' | 'kills' | 'deaths' | 'accuracy' | 'headHitRate' | 'headshotKillRate' | 'nonAwpTtdWeightedMs' | 'nonAwpReactionWeightedMs';
 type StatusFilter = 'all' | 'flagged' | Player['status'];
 
 const EMPTY_REPORT: Report = { players: [], playersByWeapon: [], evidence: [], importedDemos: [] };
@@ -220,17 +220,19 @@ function BarRow({ label, detail, value, color, reference }: { label: string; det
 }
 
 const RULE_LABEL: Record<string, string> = {
-  ttd_impossible: 'Time-to-damage impossibly low',
-  ttd_low_elite_stats: 'Low TTD + elite fragging',
-  ttd_low: 'Low time-to-damage',
-  reaction_impossible: 'Reaction below human floor',
+  ttd_impossible: 'Rifle TTD impossibly low',
+  ttd_low_elite_stats: 'Low rifle TTD + elite fragging',
+  ttd_low: 'Low rifle time-to-damage',
+  awp_ttd_impossible: 'AWP TTD impossibly low',
+  awp_ttd_low: 'Low AWP time-to-damage',
+  reaction_impossible: 'Rifle reaction below human floor',
   head_hit_rate: 'Head hit rate',
   smoke_wall_kills: 'Smoke / wall kills',
   unspotted_damage: 'Unspotted damage',
 };
 
 function formatRuleValue(rule: Rule) {
-  if (rule.name.startsWith('ttd') || rule.name.startsWith('reaction')) return `${Math.round(rule.value)} ms`;
+  if (rule.name.includes('ttd') || rule.name.startsWith('reaction')) return `${Math.round(rule.value)} ms`;
   if (rule.name === 'smoke_wall_kills') return `${Math.round(rule.value)} kills`;
   return `${(rule.value * 100).toFixed(1)}%`;
 }
@@ -256,10 +258,10 @@ function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWea
     ['Crosshair @ exposure', `${player.crosshairMedianAngle.toFixed(1)}°`],
     ['First shot error', `${player.firstShotMedianAngle.toFixed(1)}°`],
     ['Unspotted damage', pct(player.unspottedDamageRate)],
-    ['TTD p10', ms(player.ttdP10Ms, player.ttdSamples)],
-    ['TTD with AWP', ms(player.awpTtdMedianMs, player.awpTtdSamples)],
-    ['TTD without AWP', ms(player.nonAwpTtdMedianMs, player.nonAwpTtdSamples)],
-    ['Reaction p10', ms(player.reactionP10Ms, player.reactionSamples)],
+    ['TTD (rifle)', ms(player.nonAwpTtdWeightedMs, player.nonAwpTtdSamples)],
+    ['TTD (AWP)', ms(player.awpTtdWeightedMs, player.awpTtdSamples)],
+    ['Reaction (rifle)', ms(player.nonAwpReactionWeightedMs, player.nonAwpReactionSamples)],
+    ['TTD p10 (all)', ms(player.ttdP10Ms, player.ttdSamples)],
     ['Smoke / wall kills', `${player.smokeKills} / ${player.wallKills}`],
   ];
   return (
@@ -454,8 +456,8 @@ function matchesFilters(player: Player, filters: TableFilters) {
   if (player.accuracy < filters.minAccuracy) return false;
   if (player.headHitRate < filters.minHeadHit) return false;
   if (player.headshotKillRate < filters.minHsKill) return false;
-  if (filters.maxTtdMs && !(player.ttdSamples && player.ttdWeightedMs <= filters.maxTtdMs)) return false;
-  if (filters.maxReactionMs && !(player.reactionSamples && player.reactionWeightedMs <= filters.maxReactionMs)) return false;
+  if (filters.maxTtdMs && !(player.nonAwpTtdSamples && player.nonAwpTtdWeightedMs <= filters.maxTtdMs)) return false;
+  if (filters.maxReactionMs && !(player.nonAwpReactionSamples && player.nonAwpReactionWeightedMs <= filters.maxReactionMs)) return false;
   if (filters.minKd && playerKd(player) < filters.minKd) return false;
   return true;
 }
@@ -532,8 +534,8 @@ function FiltersPanel({ filters, onChange }: { filters: TableFilters; onChange: 
         <ThresholdSelect label="Accuracy" value={filters.minAccuracy} options={[0.15, 0.2, 0.25, 0.3]} format={(v) => `≥ ${Math.round(v * 100)}%`} onChange={(v) => set('minAccuracy', v)} />
         <ThresholdSelect label="Head hit rate" value={filters.minHeadHit} options={[0.2, 0.3, 0.4, 0.5]} format={(v) => `≥ ${Math.round(v * 100)}%`} onChange={(v) => set('minHeadHit', v)} />
         <ThresholdSelect label="HS kill rate" value={filters.minHsKill} options={[0.4, 0.6, 0.8]} format={(v) => `≥ ${Math.round(v * 100)}%`} onChange={(v) => set('minHsKill', v)} />
-        <ThresholdSelect label="TTD" value={filters.maxTtdMs} options={[450, 400, 350, 300]} format={(v) => `≤ ${v} ms`} onChange={(v) => set('maxTtdMs', v)} />
-        <ThresholdSelect label="Reaction time" value={filters.maxReactionMs} options={[350, 300, 250, 200]} format={(v) => `≤ ${v} ms`} onChange={(v) => set('maxReactionMs', v)} />
+        <ThresholdSelect label="TTD (rifle)" value={filters.maxTtdMs} options={[450, 400, 350, 300]} format={(v) => `≤ ${v} ms`} onChange={(v) => set('maxTtdMs', v)} />
+        <ThresholdSelect label="Reaction (rifle)" value={filters.maxReactionMs} options={[350, 300, 250, 200]} format={(v) => `≤ ${v} ms`} onChange={(v) => set('maxReactionMs', v)} />
         <ThresholdSelect label="K/D" value={filters.minKd} options={[1, 1.5, 2, 3]} format={(v) => `≥ ${v}`} onChange={(v) => set('minKd', v)} />
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -557,8 +559,8 @@ const COLUMNS: { key: SortKey | null; label: string }[] = [
   { key: 'accuracy', label: 'Accuracy' },
   { key: 'headHitRate', label: 'Head hit' },
   { key: 'headshotKillRate', label: 'HS kills' },
-  { key: 'ttdWeightedMs', label: 'TTD' },
-  { key: 'reactionWeightedMs', label: 'Reaction' },
+  { key: 'nonAwpTtdWeightedMs', label: 'TTD (rifle)' },
+  { key: 'nonAwpReactionWeightedMs', label: 'Reaction (rifle)' },
   { key: 'status', label: 'Status' },
   { key: null, label: 'Actions' },
 ];
@@ -683,8 +685,8 @@ function PlayerTable({
                     <TableCell className="tabular-nums">{pct(player.accuracy)}</TableCell>
                     <TableCell className="tabular-nums">{pct(player.headHitRate)}</TableCell>
                     <TableCell className="tabular-nums">{pct(player.headshotKillRate)}</TableCell>
-                    <TableCell className="tabular-nums">{ms(player.ttdWeightedMs, player.ttdSamples)}</TableCell>
-                    <TableCell className="tabular-nums">{ms(player.reactionWeightedMs, player.reactionSamples)}</TableCell>
+                    <TableCell className="tabular-nums">{ms(player.nonAwpTtdWeightedMs, player.nonAwpTtdSamples)}</TableCell>
+                    <TableCell className="tabular-nums">{ms(player.nonAwpReactionWeightedMs, player.nonAwpReactionSamples)}</TableCell>
                     <TableCell>
                       <Badge variant={statusVariant(player.status)}>{STATUS_LABEL[player.status]}</Badge>
                     </TableCell>
@@ -1003,9 +1005,9 @@ function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
           </GuideSection>
 
           <GuideSection title="Exposure and response">
-            <GuideItem term="TTD">Time from first spotted tick to first damage, as a round-weighted long-term average. Rough bands: 360+ ms normal, 320–360 suspicious (yellow, red when the player also frags hard — K/D ≥ 1.8, head-acc ≥ 40% or acc ≥ 30%), under 320 ms not humanly reproducible over many games (red). `p10` in details is the fast 10% tail.</GuideItem>
-            <GuideItem term="AWPer">Players with at least 5 AWP kills and at least 25% of all kills made with the AWP. Their details split AWP TTD from non-AWP TTD for a fairer comparison with riflers.</GuideItem>
-            <GuideItem term="Reaction">Time from first spotted tick to first shot. It is a demo-derived estimate, not a laboratory reaction-time test; pre-aim, sound cues and prediction affect it.</GuideItem>
+            <GuideItem term="TTD (rifle)">Time from first spotted tick to first damage on non-AWP weapons, as a round-weighted long-term average. This is what the table column and status use. Bands: 360+ ms normal, 320–360 suspicious (yellow, red when the player also frags hard — K/D ≥ 1.8, head-acc ≥ 40% or acc ≥ 30%), under 320 ms not humanly reproducible over many games (red). `p10 (all)` in details is the fast 10% tail across every weapon.</GuideItem>
+            <GuideItem term="TTD (AWP)">AWP-only TTD, flagged separately for anyone with enough AWP encounters. The AWP is a one-flick one-shot weapon so it has its own, lower bands: under 210 ms cheater, under 280 ms watch. A player can look clean on the rifle and still get flagged here (or the reverse).</GuideItem>
+            <GuideItem term="Reaction (rifle)">Time from first spotted tick to first shot on non-AWP weapons. It is a demo-derived estimate, not a laboratory reaction-time test; pre-aim, sound cues and prediction affect it. Under ~200 ms as an average flags red.</GuideItem>
             <GuideItem term="Crosshair @ exposure">Median angular distance from crosshair to opponent at confirmed exposure. Lower means stronger crosshair placement, not cheating by itself.</GuideItem>
             <GuideItem term="First shot error">Median angular distance at the first shot. Read it together with TTD and reaction instead of treating it as a standalone verdict.</GuideItem>
           </GuideSection>

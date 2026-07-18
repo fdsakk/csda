@@ -63,8 +63,12 @@ type PlayerStatsReportRow struct {
 	IsAWPer               bool     `json:"isAwper"`
 	AWPTTDSamples         int      `json:"awpTtdSamples"`
 	AWPTTDMedianMS        float64  `json:"awpTtdMedianMs"`
+	AWPTTDWeightedMS      float64  `json:"awpTtdWeightedMs"`
 	NonAWPTTDSamples      int      `json:"nonAwpTtdSamples"`
 	NonAWPTTDMedianMS     float64  `json:"nonAwpTtdMedianMs"`
+	NonAWPTTDWeightedMS   float64  `json:"nonAwpTtdWeightedMs"`
+	NonAWPReactionSamples    int   `json:"nonAwpReactionSamples"`
+	NonAWPReactionWeightedMS float64 `json:"nonAwpReactionWeightedMs"`
 	// 20 bins of 50ms across 0–1000ms, for the UI distribution charts.
 	TTDHistogram         []int                 `json:"ttdHistogram"`
 	ReactionHistogram    []int                 `json:"reactionHistogram"`
@@ -204,6 +208,15 @@ type demoSamples struct {
 	values []float64
 }
 
+func appendDemoSample(groups map[int64]*demoSamples, demoID int64, rounds int, value float64) {
+	group := groups[demoID]
+	if group == nil {
+		group = &demoSamples{rounds: rounds}
+		groups[demoID] = group
+	}
+	group.values = append(group.values, value)
+}
+
 func roundWeightedDemoMedian(groups map[int64]*demoSamples) float64 {
 	weighted, rounds := 0.0, 0
 	for _, group := range groups {
@@ -231,17 +244,21 @@ func promote(current, next string) string {
 // flagPlayer assigns a two-tier status (watch = yellow, cheater = red) from a
 // small set of hard heuristics, and records the signals it saw for the UI.
 //
-// Time-to-damage is read as a long-term average across many games:
+// Rifle/pistol (non-AWP) time-to-damage, read as a long-term average:
 //
-//	 700+ ms   weak         | normal
-//	 400-700   ok..elite    | normal
-//	 320-400   suspicious   | watch, or cheater if the player is also fragging
-//	                          hard (K/D, head-accuracy or accuracy elite)
+//	 360+ ms   normal
+//	 320-360   suspicious | watch, or cheater if the player is also fragging
+//	                        hard (K/D, head-accuracy or accuracy elite)
 //	 < 320     not humanly reproducible over many games | cheater
 //
-// A reaction time (see→first shot) below ~200 ms as an average is likewise
-// treated as a trigger/aimbot signal. Head-hit-rate flags on its own at very
-// high, well-sampled values. Smoke/wall kills and unspotted damage are kept as
+// AWP TTD is excluded from the above (one flick + one-shot kill makes it
+// naturally lower). It gets its own, lower tier for anyone with enough AWP
+// encounters: < 210 ms cheater, < 280 ms watch. The two are independent — a
+// player can look clean on the rifle and get flagged on the AWP, or vice versa.
+//
+// Non-AWP reaction time (see→first shot) below ~200 ms as an average is a
+// trigger/aimbot signal. Head-hit-rate flags on its own at very high,
+// well-sampled values. Smoke/wall kills and unspotted damage are kept as
 // context-only signals — they colour nothing by themselves.
 func flagPlayer(row *PlayerStatsReportRow, config SuspicionConfig) {
 	row.Eligible = row.DemoCount >= config.MinimumDemos && row.Shots >= config.MinimumShots
@@ -261,23 +278,34 @@ func flagPlayer(row *PlayerStatsReportRow, config SuspicionConfig) {
 	}
 	eliteStats := kd >= config.EliteKD || row.HeadHitRate >= config.EliteHeadHitRate || row.Accuracy >= config.EliteAccuracy
 
-	// Time-to-damage: the primary signal.
-	if row.TTDSamples >= config.TTDMinimumSamples && row.TTDWeightedMS > 0 {
+	// Non-AWP time-to-damage: the primary signal.
+	if row.NonAWPTTDSamples >= config.TTDMinimumSamples && row.NonAWPTTDWeightedMS > 0 {
 		switch {
-		case row.TTDWeightedMS < config.TTDCheaterMS:
-			signal("ttd_impossible", row.TTDWeightedMS, row.TTDSamples, "cheater")
-		case row.TTDWeightedMS < config.TTDSuspiciousMS:
+		case row.NonAWPTTDWeightedMS < config.TTDCheaterMS:
+			signal("ttd_impossible", row.NonAWPTTDWeightedMS, row.NonAWPTTDSamples, "cheater")
+		case row.NonAWPTTDWeightedMS < config.TTDSuspiciousMS:
 			if eliteStats {
-				signal("ttd_low_elite_stats", row.TTDWeightedMS, row.TTDSamples, "cheater")
+				signal("ttd_low_elite_stats", row.NonAWPTTDWeightedMS, row.NonAWPTTDSamples, "cheater")
 			} else {
-				signal("ttd_low", row.TTDWeightedMS, row.TTDSamples, "watch")
+				signal("ttd_low", row.NonAWPTTDWeightedMS, row.NonAWPTTDSamples, "watch")
 			}
 		}
 	}
 
-	// Reaction time (see → first shot) below human floor as an average.
-	if row.ReactionSamples >= config.TTDMinimumSamples && row.ReactionWeightedMS > 0 && row.ReactionWeightedMS < config.ReactionCheaterMS {
-		signal("reaction_impossible", row.ReactionWeightedMS, row.ReactionSamples, "cheater")
+	// AWP time-to-damage: its own tier, for anyone with enough AWP encounters —
+	// a rifler who only triggers on the AWP still gets caught here.
+	if row.AWPTTDSamples >= config.TTDMinimumSamples && row.AWPTTDWeightedMS > 0 {
+		switch {
+		case row.AWPTTDWeightedMS < config.AWPTTDCheaterMS:
+			signal("awp_ttd_impossible", row.AWPTTDWeightedMS, row.AWPTTDSamples, "cheater")
+		case row.AWPTTDWeightedMS < config.AWPTTDWatchMS:
+			signal("awp_ttd_low", row.AWPTTDWeightedMS, row.AWPTTDSamples, "watch")
+		}
+	}
+
+	// Non-AWP reaction time (see → first shot) below human floor as an average.
+	if row.NonAWPReactionSamples >= config.TTDMinimumSamples && row.NonAWPReactionWeightedMS > 0 && row.NonAWPReactionWeightedMS < config.ReactionCheaterMS {
+		signal("reaction_impossible", row.NonAWPReactionWeightedMS, row.NonAWPReactionSamples, "cheater")
 	}
 
 	// Head-hit-rate standalone.
@@ -354,6 +382,10 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 		var crosshairAngles, firstShotAngles []float64
 		ttdByDemo := make(map[int64]*demoSamples)
 		reactionByDemo := make(map[int64]*demoSamples)
+		awpTTDByDemo := make(map[int64]*demoSamples)
+		nonAWPTTDByDemo := make(map[int64]*demoSamples)
+		nonAWPReactionByDemo := make(map[int64]*demoSamples)
+		var nonAWPReactionSamples []float64
 		under190 := 0
 		for ttdRows.Next() {
 			var demoID int64
@@ -365,14 +397,10 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 				ttdRows.Close()
 				return nil, err
 			}
+			isAWP := weaponName == constants.WeaponAWP.String()
 			if value >= 0 && value <= 1000 {
 				ttdSamples = append(ttdSamples, value)
-				group := ttdByDemo[demoID]
-				if group == nil {
-					group = &demoSamples{rounds: rounds}
-					ttdByDemo[demoID] = group
-				}
-				group.values = append(group.values, value)
+				appendDemoSample(ttdByDemo, demoID, rounds, value)
 				crosshairAngles = append(crosshairAngles, crosshairAngle)
 				if firstShotAngle > 0 {
 					firstShotAngles = append(firstShotAngles, firstShotAngle)
@@ -380,21 +408,22 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 				if value <= 190 {
 					under190++
 				}
-				if weaponName == constants.WeaponAWP.String() {
+				if isAWP {
 					awpTTDSamples = append(awpTTDSamples, value)
+					appendDemoSample(awpTTDByDemo, demoID, rounds, value)
 				} else {
 					nonAWPTTDSamples = append(nonAWPTTDSamples, value)
+					appendDemoSample(nonAWPTTDByDemo, demoID, rounds, value)
 				}
 			}
 			// reaction_time_ms is -1 on rows stored before the column existed
 			if reaction >= 0 && reaction <= 1000 {
 				reactionSamples = append(reactionSamples, reaction)
-				group := reactionByDemo[demoID]
-				if group == nil {
-					group = &demoSamples{rounds: rounds}
-					reactionByDemo[demoID] = group
+				appendDemoSample(reactionByDemo, demoID, rounds, reaction)
+				if !isAWP {
+					nonAWPReactionSamples = append(nonAWPReactionSamples, reaction)
+					appendDemoSample(nonAWPReactionByDemo, demoID, rounds, reaction)
 				}
-				group.values = append(group.values, reaction)
 			}
 		}
 		ttdRows.Close()
@@ -407,8 +436,21 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 		row.TTDUnder190Rate = ratio(under190, len(ttdSamples))
 		row.AWPTTDSamples = len(awpTTDSamples)
 		row.AWPTTDMedianMS = percentile(awpTTDSamples, .5)
+		row.AWPTTDWeightedMS = roundWeightedDemoMedian(awpTTDByDemo)
+		if row.AWPTTDWeightedMS == 0 {
+			row.AWPTTDWeightedMS = row.AWPTTDMedianMS
+		}
 		row.NonAWPTTDSamples = len(nonAWPTTDSamples)
 		row.NonAWPTTDMedianMS = percentile(nonAWPTTDSamples, .5)
+		row.NonAWPTTDWeightedMS = roundWeightedDemoMedian(nonAWPTTDByDemo)
+		if row.NonAWPTTDWeightedMS == 0 {
+			row.NonAWPTTDWeightedMS = row.NonAWPTTDMedianMS
+		}
+		row.NonAWPReactionSamples = len(nonAWPReactionSamples)
+		row.NonAWPReactionWeightedMS = roundWeightedDemoMedian(nonAWPReactionByDemo)
+		if row.NonAWPReactionWeightedMS == 0 {
+			row.NonAWPReactionWeightedMS = percentile(nonAWPReactionSamples, .5)
+		}
 		for _, value := range ttdSamples {
 			row.TTDMeanMS += value
 		}
@@ -428,7 +470,6 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 		if row.ReactionWeightedMS == 0 {
 			row.ReactionWeightedMS = row.ReactionMedianMS
 		}
-		flagPlayer(row, config)
 	}
 
 	weaponRows, err := db.QueryContext(ctx, `SELECT w.steam_id,p.latest_name,w.weapon_name,SUM(w.shots),SUM(w.hit_shots),SUM(w.damage_events),SUM(w.head_hit_events),SUM(w.kills) FROM player_demo_weapon_stats w JOIN players p ON p.steam_id=w.steam_id JOIN demos d ON d.id=w.demo_id AND d.enabled=1 GROUP BY w.steam_id,p.latest_name,w.weapon_name ORDER BY w.steam_id,w.weapon_name`)
@@ -458,6 +499,7 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 		row := &report.Players[index]
 		row.AWPKillRate = ratio(row.AWPKills, row.Kills)
 		row.IsAWPer = row.AWPKills >= 5 && row.AWPKillRate >= .25
+		flagPlayer(row, config)
 	}
 
 	evidenceRows, err := db.QueryContext(ctx, `SELECT d.checksum,d.path,e.round_number,e.tick,e.steam_id,p.latest_name,e.victim_steam_id,e.kind,e.value,e.details FROM evidence e JOIN demos d ON d.id=e.demo_id LEFT JOIN players p ON p.steam_id=e.steam_id WHERE d.enabled=1 ORDER BY e.steam_id,d.demo_date,e.round_number,e.tick`)

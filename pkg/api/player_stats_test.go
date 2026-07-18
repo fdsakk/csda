@@ -31,7 +31,7 @@ func TestRoundWeightedDemoMedian(t *testing.T) {
 
 func TestFlagPlayerRequiresMinimumSample(t *testing.T) {
 	config := DefaultSuspicionConfig()
-	row := PlayerStatsReportRow{DemoCount: 2, Shots: 99, TTDSamples: 20, TTDWeightedMS: 300}
+	row := PlayerStatsReportRow{DemoCount: 2, Shots: 99, NonAWPTTDSamples: 20, NonAWPTTDWeightedMS: 300}
 	flagPlayer(&row, config)
 	if row.Eligible || row.Status != "insufficient_sample" {
 		t.Fatalf("unexpected eligibility: %+v", row)
@@ -40,23 +40,29 @@ func TestFlagPlayerRequiresMinimumSample(t *testing.T) {
 
 func TestFlagPlayerTiers(t *testing.T) {
 	config := DefaultSuspicionConfig()
-	base := PlayerStatsReportRow{DemoCount: 3, Shots: 100, TTDSamples: 20, Kills: 10, Deaths: 20, Accuracy: .15, HeadHitRate: .20}
+	base := PlayerStatsReportRow{DemoCount: 3, Shots: 100, NonAWPTTDSamples: 20, Kills: 10, Deaths: 20, Accuracy: .15, HeadHitRate: .20}
 
 	cases := []struct {
 		name   string
 		mutate func(*PlayerStatsReportRow)
 		want   string
 	}{
-		{"ttd below cheater line", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 300 }, "cheater"},
-		{"ttd suspicious with mediocre stats", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 350 }, "watch"},
-		{"ttd suspicious with elite kd", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 350; r.Kills, r.Deaths = 20, 10 }, "cheater"},
-		{"ttd suspicious with elite head accuracy", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 350; r.DamageEvents, r.HeadHitRate = 30, .42 }, "cheater"},
-		{"ttd above suspicious band is normal", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 360 }, "normal"},
-		{"healthy ttd", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 500 }, "normal"},
-		{"reaction below human floor", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 500; r.ReactionSamples, r.ReactionWeightedMS = 20, 180 }, "cheater"},
-		{"head hit rate watch", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 500; r.DamageEvents, r.HeadHitRate = 40, .52 }, "watch"},
-		{"head hit rate cheater", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 500; r.DamageEvents, r.HeadHitRate = 40, .62 }, "cheater"},
-		{"insufficient ttd sample stays normal", func(r *PlayerStatsReportRow) { r.TTDWeightedMS = 300; r.TTDSamples = 5 }, "normal"},
+		{"non-awp ttd below cheater line", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 300 }, "cheater"},
+		{"non-awp ttd suspicious with mediocre stats", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350 }, "watch"},
+		{"non-awp ttd suspicious with elite kd", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350; r.Kills, r.Deaths = 20, 10 }, "cheater"},
+		{"non-awp ttd suspicious with elite head accuracy", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350; r.DamageEvents, r.HeadHitRate = 30, .42 }, "cheater"},
+		{"non-awp ttd above suspicious band is normal", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 360 }, "normal"},
+		{"healthy non-awp ttd", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500 }, "normal"},
+		{"non-awp reaction below human floor", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.NonAWPReactionSamples, r.NonAWPReactionWeightedMS = 20, 180 }, "cheater"},
+		{"head hit rate watch", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.DamageEvents, r.HeadHitRate = 40, .52 }, "watch"},
+		{"head hit rate cheater", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.DamageEvents, r.HeadHitRate = 40, .62 }, "cheater"},
+		{"insufficient non-awp ttd sample stays normal", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 300; r.NonAWPTTDSamples = 5 }, "normal"},
+		// AWP tier is independent of the rifle: clean rifle, fast AWP → flagged.
+		{"awp ttd below cheater line", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 200 }, "cheater"},
+		{"awp ttd watch band", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 260 }, "watch"},
+		{"awp ttd normal", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 300 }, "normal"},
+		{"awp flags without being an awper", func(r *PlayerStatsReportRow) { r.IsAWPer = false; r.NonAWPTTDWeightedMS = 500; r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 200 }, "cheater"},
+		{"insufficient awp sample stays normal", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.AWPTTDSamples, r.AWPTTDWeightedMS = 5, 200 }, "normal"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

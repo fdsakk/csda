@@ -30,8 +30,12 @@ export type Player = {
   isAwper: boolean;
   awpTtdSamples: number;
   awpTtdMedianMs: number;
+  awpTtdWeightedMs: number;
   nonAwpTtdSamples: number;
   nonAwpTtdMedianMs: number;
+  nonAwpTtdWeightedMs: number;
+  nonAwpReactionSamples: number;
+  nonAwpReactionWeightedMs: number;
   /** 20 bins of 50ms across 0–1000ms */
   ttdHistogram: number[] | null;
   reactionHistogram: number[] | null;
