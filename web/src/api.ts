@@ -23,6 +23,8 @@ export type SuspicionConfig = {
   metricWatchEvidence: number;
   metricCheaterEvidence: number;
   timingWeight: number;
+  awpTimingWeight: number;
+  awpEvidenceExponent: number;
   precisionWeight: number;
   performanceWeight: number;
   synergyWeight: number;

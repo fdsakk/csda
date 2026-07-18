@@ -109,25 +109,28 @@ func TestFlagPlayerTiers(t *testing.T) {
 		{"non-awp ttd below cheater line", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 300 }, "cheater"},
 		{"non-awp ttd suspicious with mediocre stats", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350 }, "watch"},
 		{"non-awp ttd suspicious with elite kd stays watch", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350; r.Kills, r.Deaths = 20, 10 }, "watch"},
-		{"non-awp ttd suspicious with elite head accuracy", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350; r.DamageEvents, r.HeadHitRate = 30, .42 }, "cheater"},
+		{"non-awp ttd suspicious with elite head accuracy stays watch", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350; r.DamageEvents, r.HeadHitRate = 30, .42 }, "watch"},
 		{"non-awp ttd above suspicious band is normal", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 360 }, "normal"},
 		{"healthy non-awp ttd", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500 }, "normal"},
 		{"non-awp reaction below human floor", func(r *PlayerStatsReportRow) {
 			r.NonAWPTTDWeightedMS = 500
 			r.NonAWPReactionSamples, r.NonAWPReactionWeightedMS = 20, 180
 		}, "cheater"},
-		{"head hit rate watch", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.DamageEvents, r.HeadHitRate = 40, .52 }, "watch"},
-		{"head hit rate cheater", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.DamageEvents, r.HeadHitRate = 40, .62 }, "cheater"},
+		{"head hit rate alone stays normal", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.DamageEvents, r.HeadHitRate = 40, .62 }, "normal"},
 		{"insufficient non-awp ttd sample stays normal", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 300; r.NonAWPTTDSamples = 5 }, "normal"},
 		// AWP tier is independent of the rifle: clean rifle, fast AWP → flagged.
-		{"awp ttd below cheater line", func(r *PlayerStatsReportRow) {
+		{"awp ttd at cheater anchor", func(r *PlayerStatsReportRow) {
 			r.NonAWPTTDWeightedMS = 500
-			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 200
+			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 180
 		}, "cheater"},
 		{"awp ttd watch band", func(r *PlayerStatsReportRow) {
 			r.NonAWPTTDWeightedMS = 500
-			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 260
+			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 190
 		}, "watch"},
+		{"plausible skilled awp timing stays normal", func(r *PlayerStatsReportRow) {
+			r.NonAWPTTDWeightedMS = 500
+			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 200
+		}, "normal"},
 		{"awp ttd normal", func(r *PlayerStatsReportRow) {
 			r.NonAWPTTDWeightedMS = 500
 			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 300
@@ -135,7 +138,7 @@ func TestFlagPlayerTiers(t *testing.T) {
 		{"awp flags without being an awper", func(r *PlayerStatsReportRow) {
 			r.IsAWPer = false
 			r.NonAWPTTDWeightedMS = 500
-			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 200
+			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 180
 		}, "cheater"},
 		{"insufficient awp sample stays normal", func(r *PlayerStatsReportRow) {
 			r.NonAWPTTDWeightedMS = 500
@@ -175,10 +178,12 @@ func TestSuspicionScoreCalibration(t *testing.T) {
 		{"healthy aggregate", func(*PlayerStatsReportRow) {}, "normal", 0, config.ScoreWatchThreshold},
 		{"borderline rifle timing", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350 }, "watch", config.ScoreWatchThreshold, config.ScoreCheaterThreshold},
 		{"impossible rifle timing", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 300 }, "cheater", 85, 101},
-		{"timing and accuracy converge", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS, r.Accuracy = 350, .30 }, "cheater", config.ScoreCheaterThreshold, 101},
+		{"timing and accuracy remain review-only", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS, r.Accuracy = 350, .30 }, "watch", config.ScoreWatchThreshold, config.ScoreCheaterThreshold},
 		{"impossible reaction", func(r *PlayerStatsReportRow) { r.NonAWPReactionSamples, r.NonAWPReactionWeightedMS = 20, 180 }, "cheater", 85, 101},
-		{"extreme head-hit rate", func(r *PlayerStatsReportRow) { r.HeadHitRate = .62 }, "cheater", 85, 101},
+		{"extreme head-hit rate cannot flag alone", func(r *PlayerStatsReportRow) { r.HeadHitRate = .62 }, "normal", 0, config.ScoreWatchThreshold},
 		{"K/D cannot flag alone", func(r *PlayerStatsReportRow) { r.Kills, r.Deaths = 40, 10 }, "normal", 0, config.ScoreWatchThreshold},
+		{"plausible skilled AWP timing", func(r *PlayerStatsReportRow) { r.AWPTTDSamples, r.AWPTTDWeightedMS = 100, 200 }, "normal", 0, config.ScoreWatchThreshold},
+		{"AWP cheater anchor", func(r *PlayerStatsReportRow) { r.AWPTTDSamples, r.AWPTTDWeightedMS = 100, 180 }, "cheater", config.ScoreCheaterThreshold, 101},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -108,7 +108,7 @@ export function PlayerDetails({ player, weapons }: { player: Player; weapons: Pl
     { label: 'Airborne', shots: player.airborneShots, rate: player.airborneHitRate },
   ].filter((row) => row.shots > 0);
   const stats: [string, string][] = [
-    ['Suspicion score', player.eligible ? `${Math.round(player.suspicionScore)} / 100` : 'low sample'],
+    ['Review score', player.eligible ? `${Math.round(player.suspicionScore)} / 100` : 'low sample'],
     ['Evidence groups', `T ${Math.round(player.timingScore)} · P ${Math.round(player.precisionScore)} · K/D ${Math.round(player.performanceScore)}`],
     ['Crosshair @ exposure', `${player.crosshairMedianAngle.toFixed(1)}°`],
     ['First shot error', `${player.firstShotMedianAngle.toFixed(1)}°`],

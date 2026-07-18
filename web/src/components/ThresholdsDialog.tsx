@@ -63,13 +63,14 @@ const GROUPS: { title: string; description: string; fields: Field[] }[] = [
     title: 'AWP timing anchors',
     description: 'AWP has separate anchors because one-shot flicks naturally produce lower TTD.',
     fields: [
-      { key: 'awpTtdWatchMs', label: 'Watch anchor', description: 'AWP TTD at this value receives watch-anchor evidence.', suffix: 'ms' },
-      { key: 'awpTtdCheaterMs', label: 'Cheater anchor', description: 'AWP TTD at this value receives cheater-anchor evidence.', suffix: 'ms' },
+      { key: 'awpTtdWatchMs', label: 'Evidence start', description: 'AWP TTD begins producing evidence below this value.', suffix: 'ms' },
+      { key: 'awpTtdCheaterMs', label: 'Cheater anchor', description: 'AWP evidence reaches full strength at this value.', suffix: 'ms' },
+      { key: 'awpEvidenceExponent', label: 'Evidence curve', description: 'Above 1 suppresses ordinary AWP timings while preserving truly extreme values.', step: 0.1, min: 1, max: 5 },
     ],
   },
   {
     title: 'Precision anchors',
-    description: 'Head-hit and accuracy share one precision group; only the stronger result is counted.',
+    description: 'Head-hit and accuracy share one support group. They can strengthen suspicious timing but can never create a flag by themselves.',
     fields: [
       { key: 'eliteHeadHitRate', label: 'Head-hit evidence start', description: 'First soft head-hit evidence anchor.', step: 1, suffix: '%', percent: true },
       { key: 'headHitWatchThreshold', label: 'Head-hit watch anchor', description: 'Middle head-hit evidence anchor.', step: 1, suffix: '%', percent: true },
@@ -80,7 +81,7 @@ const GROUPS: { title: string; description: string; fields: Field[] }[] = [
   },
   {
     title: 'Performance anchors',
-    description: 'K/D cannot flag a player by itself. It only amplifies timing or precision evidence already present.',
+    description: 'K/D cannot flag a player by itself. It only supports timing evidence, and does not stack with precision support.',
     fields: [
       { key: 'eliteKd', label: 'K/D watch anchor', description: 'Start of K/D supporting evidence.', step: 0.1, min: 0.1 },
       { key: 'eliteKdCheater', label: 'K/D cheater anchor', description: 'High K/D supporting evidence.', step: 0.1, min: 0.1 },
@@ -88,12 +89,13 @@ const GROUPS: { title: string; description: string; fields: Field[] }[] = [
   },
   {
     title: 'Evidence fusion',
-    description: 'Weights control group strength. Synergy rewards simultaneous timing and precision evidence after correlated metrics are collapsed.',
+    description: 'Timing is required for every flag. Precision or K/D can add only a bounded support bonus after correlated metrics are collapsed.',
     fields: [
       { key: 'timingWeight', label: 'Timing weight', description: 'Strength of the timing group.', step: 1, suffix: '%', percent: true },
-      { key: 'precisionWeight', label: 'Precision weight', description: 'Strength of the precision group.', step: 1, suffix: '%', percent: true },
+      { key: 'awpTimingWeight', label: 'AWP timing weight', description: 'Reduces AWP evidence for one-shot kills and held angles.', step: 1, suffix: '%', percent: true },
+      { key: 'precisionWeight', label: 'Precision support weight', description: 'Strength of head-hit or accuracy support.', step: 1, suffix: '%', percent: true },
       { key: 'performanceWeight', label: 'K/D support weight', description: 'Maximum strength of the gated K/D amplifier.', step: 1, suffix: '%', percent: true },
-      { key: 'synergyWeight', label: 'Timing + precision synergy', description: 'Bonus when both independent groups are elevated.', step: 1, suffix: '%', percent: true },
+      { key: 'synergyWeight', label: 'Maximum support bonus', description: 'Caps how strongly precision or K/D can raise timing evidence.', step: 1, suffix: '%', percent: true },
     ],
   },
 ];
@@ -176,7 +178,7 @@ export function ThresholdsDialog({ onChanged }: { onChanged: () => void }) {
                 <div className="rounded-lg border border-border bg-muted/40 p-4 text-sm leading-5 text-muted-foreground">
                   <p className="font-medium text-foreground">How the score works</p>
                   <p className="mt-1">
-                    Every aggregate metric becomes soft evidence from 0–100 and is reduced by sample confidence. The strongest TTD/reaction result forms the timing group; the strongest head-hit/accuracy result forms precision. Those independent groups are fused without double-counting correlated stats. K/D can only amplify an existing signal, while timing plus precision receives a bounded synergy bonus. The final curve maps the result to the Normal, Watch and Cheater bands below.
+                    Every aggregate metric becomes soft evidence from 0–100 and is reduced by sample confidence. The strongest TTD/reaction result forms the required timing core. AWP timing is down-weighted because held angles and one-shot kills naturally look faster. Head-hit, accuracy and K/D describe skill as well as cheating, so they can only add a bounded support bonus to timing and can never flag a player alone. The final curve maps the result to Normal, Watch and Cheater review bands.
                   </p>
                 </div>
                 {GROUPS.map((group) => (

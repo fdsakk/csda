@@ -398,6 +398,14 @@ func headHitEvidence(value float64, config SuspicionConfig) float64 {
 	return clamp01(middleEvidence + position*(config.MetricCheaterEvidence-middleEvidence))
 }
 
+// AWP timing is intentionally conservative: ordinary held-angle and one-shot
+// values near the watch anchor contribute almost nothing, while values at or
+// below the much lower cheater anchor rise sharply.
+func awpEvidence(value float64, config SuspicionConfig) float64 {
+	position := clamp01((config.AWPTTDWatchMS - value) / (config.AWPTTDWatchMS - config.AWPTTDCheaterMS))
+	return math.Pow(position, config.AWPEvidenceExponent)
+}
+
 func sampleConfidence(sample int, config SuspicionConfig) float64 {
 	n := float64(max(0, sample))
 	return config.SampleConfidenceFloor + (1-config.SampleConfidenceFloor)*n/(n+config.SampleConfidenceK)
@@ -413,11 +421,11 @@ func strongest(signals []scoredSignal) scoredSignal {
 	return best
 }
 
-// flagPlayer fuses aggregate evidence into a 0–100 score. Timing and precision
-// use the strongest metric in each group to avoid double-counting correlated
-// stats. K/D can only amplify an existing core signal. Timing + precision also
-// receive a bounded synergy bonus because their combination is rarer than
-// either signal in isolation.
+// flagPlayer fuses aggregate evidence into a 0–100 review score. Timing is the
+// required core because accuracy, head-hit rate and K/D are heavily confounded
+// by skill. Those outcome stats can only add bounded support to an existing
+// timing anomaly, and only the strongest correlated metric in each group is
+// retained. AWP timing is separately down-weighted for one-shot/held-angle play.
 func flagPlayer(row *PlayerStatsReportRow, config SuspicionConfig) {
 	row.Eligible = row.DemoCount >= config.MinimumDemos && row.Shots >= config.MinimumShots
 	if !row.Eligible {
@@ -435,7 +443,7 @@ func flagPlayer(row *PlayerStatsReportRow, config SuspicionConfig) {
 	if row.AWPTTDSamples >= config.TTDMinimumSamples && row.AWPTTDWeightedMS > 0 {
 		timingSignals = append(timingSignals, scoredSignal{
 			name: "awp_ttd_score", value: row.AWPTTDWeightedMS, sample: row.AWPTTDSamples,
-			evidence: anchoredEvidence(row.AWPTTDWeightedMS, config.AWPTTDWatchMS, config.AWPTTDCheaterMS, true, config) * sampleConfidence(row.AWPTTDSamples, config),
+			evidence: config.AWPTimingWeight * awpEvidence(row.AWPTTDWeightedMS, config) * sampleConfidence(row.AWPTTDSamples, config),
 		})
 	}
 	if row.NonAWPReactionSamples >= config.TTDMinimumSamples && row.NonAWPReactionWeightedMS > 0 {
@@ -470,10 +478,12 @@ func flagPlayer(row *PlayerStatsReportRow, config SuspicionConfig) {
 	timing := clamp01(config.TimingWeight * timingSignal.evidence)
 	precision := clamp01(config.PrecisionWeight * precisionSignal.evidence)
 	performance := clamp01(config.PerformanceWeight * performanceSignal.evidence)
-	core := 1 - (1-timing)*(1-precision)
-	performanceSupport := performance * max(timing, precision)
-	combined := 1 - (1-core)*(1-performanceSupport)
-	combined += config.SynergyWeight * math.Sqrt(timing*precision) * (1 - combined)
+	// Outcome statistics are strongly confounded by player skill. They may
+	// strengthen timing evidence, but can never create suspicion on their own.
+	// Taking the stronger support group also prevents high accuracy, head-hit
+	// rate and K/D from stacking several descriptions of the same skill gap.
+	support := max(precision, performance)
+	combined := timing + config.SynergyWeight*timing*support*(1-timing)
 	combined = clamp01(combined)
 
 	row.TimingScore = timing * 100
@@ -489,7 +499,13 @@ func flagPlayer(row *PlayerStatsReportRow, config SuspicionConfig) {
 	if row.Status == "normal" {
 		return
 	}
-	for _, signal := range []scoredSignal{timingSignal, precisionSignal, performanceSignal} {
+	supportSignal := precisionSignal
+	supportSignal.evidence = precision
+	if performance > precision {
+		supportSignal = performanceSignal
+		supportSignal.evidence = performance
+	}
+	for _, signal := range []scoredSignal{timingSignal, supportSignal} {
 		if signal.evidence <= 0 {
 			continue
 		}

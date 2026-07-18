@@ -93,6 +93,8 @@ type SuspicionConfig struct {
 	MetricWatchEvidence   float64 `json:"metricWatchEvidence"`
 	MetricCheaterEvidence float64 `json:"metricCheaterEvidence"`
 	TimingWeight          float64 `json:"timingWeight"`
+	AWPTimingWeight       float64 `json:"awpTimingWeight"`
+	AWPEvidenceExponent   float64 `json:"awpEvidenceExponent"`
 	PrecisionWeight       float64 `json:"precisionWeight"`
 	PerformanceWeight     float64 `json:"performanceWeight"`
 	SynergyWeight         float64 `json:"synergyWeight"`
@@ -109,8 +111,8 @@ func DefaultSuspicionConfig() SuspicionConfig {
 		TTDSuspiciousMS:         360,
 		ReactionCheaterMS:       200,
 		ReactionWatchMS:         240,
-		AWPTTDCheaterMS:         210,
-		AWPTTDWatchMS:           280,
+		AWPTTDCheaterMS:         180,
+		AWPTTDWatchMS:           240,
 		EliteKD:                 1.8,
 		EliteHeadHitRate:        .40,
 		EliteAccuracy:           .30,
@@ -124,12 +126,14 @@ func DefaultSuspicionConfig() SuspicionConfig {
 		MetricWatchEvidence:     .30,
 		MetricCheaterEvidence:   .85,
 		TimingWeight:            1,
+		AWPTimingWeight:         .82,
+		AWPEvidenceExponent:     2,
 		PrecisionWeight:         1,
 		PerformanceWeight:       .75,
 		SynergyWeight:           .35,
 		SampleConfidenceFloor:   .75,
 		SampleConfidenceK:       30,
-		ScoreCurveExponent:      .50,
+		ScoreCurveExponent:      .65,
 	}
 }
 
@@ -182,6 +186,7 @@ func ValidateSuspicionConfig(config SuspicionConfig) error {
 	}
 	for name, value := range map[string]float64{
 		"timing weight":           config.TimingWeight,
+		"AWP timing weight":       config.AWPTimingWeight,
 		"precision weight":        config.PrecisionWeight,
 		"performance weight":      config.PerformanceWeight,
 		"synergy weight":          config.SynergyWeight,
@@ -196,6 +201,9 @@ func ValidateSuspicionConfig(config SuspicionConfig) error {
 	}
 	if config.ScoreCurveExponent <= 0 || config.ScoreCurveExponent > 2 {
 		return errors.New("score curve exponent must be greater than 0 and at most 2")
+	}
+	if config.AWPEvidenceExponent < 1 || config.AWPEvidenceExponent > 5 {
+		return errors.New("AWP evidence exponent must be between 1 and 5")
 	}
 	return nil
 }
