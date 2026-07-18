@@ -15,7 +15,8 @@ const (
 	PlayerStatsExportFormat = "cs-demo-analyzer/player-stats"
 	// PlayerStatsExportVersion is the current export payload version.
 	// Version 2 added reactionTimeMs to encounters; version 1 payloads are
-	// still importable with that field defaulting to -1.
+	// still importable with that field defaulting to -1. The legacy "reactions"
+	// list in older payloads is ignored on import — nothing ever read it.
 	PlayerStatsExportVersion = 2
 )
 
@@ -72,20 +73,6 @@ type ExportedEncounter struct {
 	Snap             bool    `json:"snap"`
 }
 
-type ExportedReaction struct {
-	RoundNumber      int     `json:"roundNumber"`
-	AttackerSteamID  string  `json:"attackerSteamId"`
-	VictimSteamID    string  `json:"victimSteamId"`
-	FirstSpottedTick int     `json:"firstSpottedTick"`
-	ConfirmedTick    int     `json:"confirmedTick"`
-	ShotTick         int     `json:"shotTick"`
-	ReactionTimeMS   float64 `json:"reactionTimeMs"`
-	ConfirmedTimeMS  float64 `json:"confirmedTimeMs"`
-	FirstAngle       float64 `json:"firstAngle"`
-	ShotAngle        float64 `json:"shotAngle"`
-	WeaponName       string  `json:"weaponName"`
-}
-
 type ExportedWeaponStats struct {
 	SteamID       string `json:"steamId"`
 	WeaponName    string `json:"weaponName"`
@@ -119,7 +106,6 @@ type ExportedDemo struct {
 	ImportedAt      string                    `json:"importedAt"`
 	PlayerStats     []ExportedPlayerDemoStats `json:"playerStats"`
 	Encounters      []ExportedEncounter       `json:"encounters"`
-	Reactions       []ExportedReaction        `json:"reactions"`
 	WeaponStats     []ExportedWeaponStats     `json:"weaponStats"`
 	Evidence        []ExportedEvidence        `json:"evidence"`
 }
@@ -209,28 +195,6 @@ func ExportPlayerStatsData(ctx context.Context, databasePath string) (*PlayerSta
 		}
 	}
 	if err := encounterRows.Close(); err != nil {
-		return nil, err
-	}
-
-	reactionRows, err := db.QueryContext(ctx, `SELECT demo_id,round_number,attacker_steam_id,victim_steam_id,first_spotted_tick,confirmed_tick,shot_tick,reaction_time_ms,confirmed_time_ms,first_angle,shot_angle,weapon_name FROM reactions ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	for reactionRows.Next() {
-		var demoID int64
-		var attacker, victim uint64
-		var r ExportedReaction
-		if err := reactionRows.Scan(&demoID, &r.RoundNumber, &attacker, &victim, &r.FirstSpottedTick, &r.ConfirmedTick, &r.ShotTick, &r.ReactionTimeMS, &r.ConfirmedTimeMS, &r.FirstAngle, &r.ShotAngle, &r.WeaponName); err != nil {
-			reactionRows.Close()
-			return nil, err
-		}
-		if demo := demoIDs[demoID]; demo != nil {
-			r.AttackerSteamID = strconv.FormatUint(attacker, 10)
-			r.VictimSteamID = strconv.FormatUint(victim, 10)
-			demo.Reactions = append(demo.Reactions, r)
-		}
-	}
-	if err := reactionRows.Close(); err != nil {
 		return nil, err
 	}
 
@@ -431,7 +395,7 @@ func ImportPlayerStatsData(ctx context.Context, databasePath string, payload *Pl
 			return nil, err
 		}
 		enabled := quality.Status != demoQualityStatusWarning
-		res, err := tx.ExecContext(ctx, `INSERT INTO demos(checksum,path,file_name,map_name,demo_date,tick_rate,build_number,source,analysis_version,imported_at,enabled,quality_status,quality_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		res, err := tx.ExecContext(ctx, `INSERT INTO demos(checksum,path,file_name,map_name,demo_date,tick_rate,build_number,source,analysis_version,imported_at,enabled,quality_status,quality_reason,origin) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'imported')`,
 			demo.Checksum, demo.Path, demo.FileName, demo.MapName, demo.DemoDate, demo.TickRate, demo.BuildNumber, demo.Source, demo.AnalysisVersion, now, enabled, quality.Status, quality.Reason)
 		if err != nil {
 			return nil, err
@@ -470,21 +434,6 @@ func ImportPlayerStatsData(ctx context.Context, databasePath string, payload *Pl
 			}
 			_, err = tx.ExecContext(ctx, `INSERT INTO encounters(demo_id,round_number,attacker_steam_id,victim_steam_id,first_spotted_tick,confirmed_tick,damage_tick,ttd_ms,ttd_confirmed_ms,first_shot_time_ms,reaction_time_ms,first_angle,confirmed_angle,first_shot_angle,distance_meters,weapon_name,snap) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 				demoID, e.RoundNumber, attacker, victim, e.FirstSpottedTick, e.ConfirmedTick, e.DamageTick, e.TTDMS, e.TTDConfirmedMS, e.FirstShotTimeMS, reactionTimeMS, e.FirstAngle, e.ConfirmedAngle, e.FirstShotAngle, e.DistanceMeters, e.WeaponName, e.Snap)
-			if err != nil {
-				return nil, err
-			}
-		}
-		for _, r := range demo.Reactions {
-			attacker, err := parseSteamID(r.AttackerSteamID)
-			if err != nil {
-				return nil, err
-			}
-			victim, err := parseSteamID(r.VictimSteamID)
-			if err != nil {
-				return nil, err
-			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO reactions(demo_id,round_number,attacker_steam_id,victim_steam_id,first_spotted_tick,confirmed_tick,shot_tick,reaction_time_ms,confirmed_time_ms,first_angle,shot_angle,weapon_name) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-				demoID, r.RoundNumber, attacker, victim, r.FirstSpottedTick, r.ConfirmedTick, r.ShotTick, r.ReactionTimeMS, r.ConfirmedTimeMS, r.FirstAngle, r.ShotAngle, r.WeaponName)
 			if err != nil {
 				return nil, err
 			}

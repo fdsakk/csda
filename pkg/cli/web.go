@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -23,6 +24,7 @@ func runWeb(args []string) int {
 	uploads := fs.String("uploads", "uploads", "Folder used to store uploaded demos")
 	assets := fs.String("assets", "web/dist", "Built React assets folder")
 	source := fs.String("source", "", "Force demo source (default: detect automatically)")
+	configPath := fs.String("suspicion-config", "", "Optional JSON suspicion threshold configuration")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -32,7 +34,25 @@ func runWeb(args []string) int {
 			return 2
 		}
 	}
-	webServer, err := apiweb.NewServer(apiweb.Options{DatabasePath: *database, UploadsPath: *uploads, AssetsPath: *assets, Source: constants.DemoSource(*source)})
+	config := api.DefaultSuspicionConfig()
+	if *configPath != "" {
+		data, err := os.ReadFile(*configPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		if err := json.Unmarshal(data, &config); err != nil {
+			fmt.Fprintf(os.Stderr, "invalid suspicion config: %v\n", err)
+			return 2
+		}
+	}
+	authUser := os.Getenv("CSDA_AUTH_USER")
+	authPassword := os.Getenv("CSDA_AUTH_PASSWORD")
+	if (authUser == "") != (authPassword == "") {
+		fmt.Fprintln(os.Stderr, "set both CSDA_AUTH_USER and CSDA_AUTH_PASSWORD to enable authentication, or neither")
+		return 2
+	}
+	webServer, err := apiweb.NewServer(apiweb.Options{DatabasePath: *database, UploadsPath: *uploads, AssetsPath: *assets, Source: constants.DemoSource(*source), Config: config, AuthUser: authUser, AuthPassword: authPassword})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -50,6 +70,11 @@ func runWeb(args []string) int {
 	}()
 	fmt.Printf("CS Demo Analyzer UI: http://%s\n", *address)
 	fmt.Printf("Database: %s | uploads: %s\n", *database, *uploads)
+	if authUser != "" {
+		fmt.Println("Authentication: enabled (HTTP Basic Auth)")
+	} else {
+		fmt.Println("Authentication: disabled (set CSDA_AUTH_USER and CSDA_AUTH_PASSWORD to enable)")
+	}
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		fmt.Fprintln(os.Stderr, err)
 		return 1

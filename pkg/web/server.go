@@ -1,8 +1,11 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -80,6 +83,13 @@ type Options struct {
 	UploadsPath  string
 	AssetsPath   string
 	Source       constants.DemoSource
+	// Config holds the suspicion thresholds used by /api/report. Zero value
+	// falls back to api.DefaultSuspicionConfig().
+	Config api.SuspicionConfig
+	// AuthUser/AuthPassword enable HTTP Basic Auth on everything except
+	// /api/health when both are set.
+	AuthUser     string
+	AuthPassword string
 }
 
 type JobStatus string
@@ -110,16 +120,18 @@ type Job struct {
 }
 
 type Server struct {
-	options   Options
-	mux       *http.ServeMux
-	mu        sync.RWMutex
-	uploadsMu sync.Mutex
-	jobs      map[string]*Job
-	queue     chan string
-	ctx       context.Context
-	cancel    context.CancelFunc
-	done      chan struct{}
-	close     sync.Once
+	options     Options
+	mux         *http.ServeMux
+	mu          sync.RWMutex
+	uploadsMu   sync.Mutex
+	jobs        map[string]*Job
+	queue       chan string
+	subMu       sync.Mutex
+	subscribers map[chan []byte]struct{}
+	ctx         context.Context
+	cancel      context.CancelFunc
+	done        chan struct{}
+	close       sync.Once
 }
 
 func NewServer(options Options) (*Server, error) {
@@ -129,12 +141,16 @@ func NewServer(options Options) (*Server, error) {
 	if options.UploadsPath == "" {
 		options.UploadsPath = "uploads"
 	}
+	if options.Config.MinimumDemos == 0 {
+		options.Config = api.DefaultSuspicionConfig()
+	}
 	if err := os.MkdirAll(options.UploadsPath, 0o755); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	server := &Server{options: options, mux: http.NewServeMux(), jobs: make(map[string]*Job), queue: make(chan string, 32), ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	server := &Server{options: options, mux: http.NewServeMux(), jobs: make(map[string]*Job), queue: make(chan string, 32), subscribers: make(map[chan []byte]struct{}), ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	server.routes()
+	go server.broadcastJobs()
 	go func() {
 		defer close(server.done)
 		server.worker()
@@ -148,12 +164,38 @@ func (s *Server) Close() {
 		<-s.done
 	})
 }
-func (s *Server) Handler() http.Handler { return s.mux }
+
+// Handler returns the HTTP handler, wrapped with Basic Auth when credentials
+// are configured. /api/health stays open for container health checks.
+func (s *Server) Handler() http.Handler {
+	if s.options.AuthUser == "" && s.options.AuthPassword == "" {
+		return s.mux
+	}
+	wantUser := sha256.Sum256([]byte(s.options.AuthUser))
+	wantPassword := sha256.Sum256([]byte(s.options.AuthPassword))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/health" {
+			s.mux.ServeHTTP(w, r)
+			return
+		}
+		user, password, ok := r.BasicAuth()
+		gotUser := sha256.Sum256([]byte(user))
+		gotPassword := sha256.Sum256([]byte(password))
+		if !ok || subtle.ConstantTimeCompare(wantUser[:], gotUser[:]) != 1 || subtle.ConstantTimeCompare(wantPassword[:], gotPassword[:]) != 1 {
+			w.Header().Set("WWW-Authenticate", `Basic realm="cs-demo-analyzer", charset="UTF-8"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		s.mux.ServeHTTP(w, r)
+	})
+}
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/report", s.handleReport)
 	s.mux.HandleFunc("GET /api/jobs", s.handleJobs)
+	s.mux.HandleFunc("GET /api/events", s.handleEvents)
+	s.mux.HandleFunc("DELETE /api/jobs/{id}", s.handleJobDelete)
 	s.mux.HandleFunc("POST /api/uploads", s.handleUpload)
 	s.mux.HandleFunc("DELETE /api/uploads", s.handleUploadsClear)
 	s.mux.HandleFunc("PATCH /api/demos", s.handleAllDemosToggle)
@@ -176,7 +218,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
-	report, err := api.GetPlayerStatsReport(r.Context(), api.PlayerStatsReportOptions{DatabasePath: s.options.DatabasePath, Config: api.DefaultSuspicionConfig()})
+	report, err := api.GetPlayerStatsReport(r.Context(), api.PlayerStatsReportOptions{DatabasePath: s.options.DatabasePath, Config: s.options.Config})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -190,7 +232,7 @@ func publicJob(job *Job) Job {
 	return copy
 }
 
-func (s *Server) handleJobs(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) sortedJobs() []Job {
 	s.mu.RLock()
 	jobs := make([]Job, 0, len(s.jobs))
 	for _, job := range s.jobs {
@@ -198,7 +240,98 @@ func (s *Server) handleJobs(w http.ResponseWriter, _ *http.Request) {
 	}
 	s.mu.RUnlock()
 	sort.Slice(jobs, func(i, j int) bool { return jobs[i].CreatedAt.After(jobs[j].CreatedAt) })
-	writeJSON(w, http.StatusOK, jobs)
+	return jobs
+}
+
+func (s *Server) handleJobs(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.sortedJobs())
+}
+
+func (s *Server) handleJobDelete(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.mu.Lock()
+	job, ok := s.jobs[id]
+	if ok && (job.Status == JobQueued || job.Status == JobRunning) {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "job is still running"})
+		return
+	}
+	delete(s.jobs, id)
+	s.mu.Unlock()
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// broadcastJobs pushes the job list to SSE subscribers whenever it changes,
+// checking at a fixed cadence so per-tick parse progress can't flood clients.
+func (s *Server) broadcastJobs() {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	var last []byte
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			payload, err := json.Marshal(s.sortedJobs())
+			if err != nil || bytes.Equal(payload, last) {
+				continue
+			}
+			last = payload
+			s.subMu.Lock()
+			for subscriber := range s.subscribers {
+				select {
+				case subscriber <- payload:
+				default: // slow client; it catches up on the next change
+				}
+			}
+			s.subMu.Unlock()
+		}
+	}
+}
+
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+
+	subscriber := make(chan []byte, 4)
+	s.subMu.Lock()
+	s.subscribers[subscriber] = struct{}{}
+	s.subMu.Unlock()
+	defer func() {
+		s.subMu.Lock()
+		delete(s.subscribers, subscriber)
+		s.subMu.Unlock()
+	}()
+
+	send := func(payload []byte) bool {
+		_, err := fmt.Fprintf(w, "data: %s\n\n", payload)
+		flusher.Flush()
+		return err == nil
+	}
+	if payload, err := json.Marshal(s.sortedJobs()); err == nil && !send(payload) {
+		return
+	}
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-s.ctx.Done():
+			return
+		case payload := <-subscriber:
+			if !send(payload) {
+				return
+			}
+		}
+	}
 }
 
 func randomID() (string, error) {
@@ -504,8 +637,32 @@ func (s *Server) worker() {
 			} else {
 				job.Status = JobCompleted
 			}
+			s.pruneFinishedLocked()
 			s.mu.Unlock()
+			// The uploaded .dem files are only needed during analysis — the
+			// stats live in the database afterwards. Re-analyzing after an
+			// algorithm change requires re-uploading the demo.
+			_ = os.RemoveAll(filepath.Join(s.options.UploadsPath, id))
 		}
+	}
+}
+
+// maxFinishedJobs caps how many completed/failed jobs stay listed in memory.
+const maxFinishedJobs = 20
+
+func (s *Server) pruneFinishedLocked() {
+	finished := make([]*Job, 0, len(s.jobs))
+	for _, job := range s.jobs {
+		if job.Status == JobCompleted || job.Status == JobFailed {
+			finished = append(finished, job)
+		}
+	}
+	if len(finished) <= maxFinishedJobs {
+		return
+	}
+	sort.Slice(finished, func(i, j int) bool { return finished[i].CreatedAt.After(finished[j].CreatedAt) })
+	for _, job := range finished[maxFinishedJobs:] {
+		delete(s.jobs, job.ID)
 	}
 }
 

@@ -67,12 +67,19 @@ func (cli *cliArgs) fromArgs(args []string) error {
 	return nil
 }
 
+// Version is stamped at build time via -ldflags "-X .../pkg/cli.Version=...".
+var Version = "dev"
+
 func Run(args []string) int {
 	if len(args) > 0 && args[0] == "stats" {
 		return runStats(args[1:])
 	}
 	if len(args) > 0 && args[0] == "web" {
 		return runWeb(args[1:])
+	}
+	if len(args) > 0 && args[0] == "version" {
+		fmt.Println(Version)
+		return 0
 	}
 	var cli cliArgs
 	err := cli.fromArgs(args)

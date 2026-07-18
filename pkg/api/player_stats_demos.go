@@ -45,7 +45,7 @@ func SetAllDemosEnabled(ctx context.Context, databasePath string, enabled bool) 
 }
 
 // DeleteDemo permanently removes a demo and all of its stats (player demo
-// stats, encounters, reactions, weapon stats and evidence cascade with it).
+// stats, encounters, weapon stats and evidence cascade with it).
 // It returns the stored demo path so callers can also remove the file.
 func DeleteDemo(ctx context.Context, databasePath, checksum string) (string, error) {
 	db, err := openPlayerStatsDB(databasePath)

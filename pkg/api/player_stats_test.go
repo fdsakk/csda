@@ -176,10 +176,8 @@ func TestStoreAndAggregateMultipleDemosBySteamID(t *testing.T) {
 				weapon, ttd = "AWP", 100
 			}
 			stats.Encounters = append(stats.Encounters, DemoEncounter{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: ttd, TTDConfirmedMS: 120, ReactionTimeMS: 100, ConfirmedAngle: 3, FirstShotAngle: 1, WeaponName: weapon})
-			stats.Reactions = append(stats.Reactions, DemoReaction{AttackerSteamID64: steamID, VictimSteamID64: 2, ReactionTimeMS: 100})
 		}
 		stats.Encounters = append(stats.Encounters, DemoEncounter{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 1500, ReactionTimeMS: 1500})
-		stats.Reactions = append(stats.Reactions, DemoReaction{AttackerSteamID64: steamID, VictimSteamID64: 2, ReactionTimeMS: 1500})
 		if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
 			t.Fatal(err)
 		}
@@ -361,7 +359,6 @@ func TestDeleteDemoRemovesAllStats(t *testing.T) {
 		Players:    map[uint64]*DemoPlayerStats{steamID: {SteamID64: steamID, Name: "Alice", Rounds: 10, Shots: 50}},
 		Weapons:    map[uint64]map[string]*DemoWeaponStats{steamID: {"AK-47": {SteamID64: steamID, WeaponName: "AK-47", Shots: 50}}},
 		Encounters: []DemoEncounter{{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 150}},
-		Reactions:  []DemoReaction{{AttackerSteamID64: steamID, VictimSteamID64: 2, ReactionTimeMS: 100}},
 		Evidence:   []DemoEvidence{{SteamID64: steamID, VictimID: 2, Kind: "test", Value: 1, Details: "{}"}},
 	}
 	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
@@ -384,7 +381,7 @@ func TestDeleteDemoRemovesAllStats(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	for _, table := range []string{"demos", "player_demo_stats", "encounters", "reactions", "player_demo_weapon_stats", "evidence"} {
+	for _, table := range []string{"demos", "player_demo_stats", "encounters", "player_demo_weapon_stats", "evidence"} {
 		var count int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil {
 			t.Fatal(err)
@@ -480,7 +477,6 @@ func TestReportExcludesDisabledDemos(t *testing.T) {
 			Players:    map[uint64]*DemoPlayerStats{steamID: {SteamID64: steamID, Name: "Alice", Rounds: 10, Shots: 50, HitShots: 25}},
 			Weapons:    map[uint64]map[string]*DemoWeaponStats{steamID: {"AK-47": {SteamID64: steamID, WeaponName: "AK-47", Shots: 50, HitShots: 25}}},
 			Encounters: []DemoEncounter{{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 150, ReactionTimeMS: 100}},
-			Reactions:  []DemoReaction{{AttackerSteamID64: steamID, VictimSteamID64: 2, ReactionTimeMS: 100}},
 			Evidence:   []DemoEvidence{{SteamID64: steamID, VictimID: 2, Kind: "test", Value: 1, Details: "{}"}},
 		}
 		if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
@@ -492,7 +488,7 @@ func TestReportExcludesDisabledDemos(t *testing.T) {
 	}
 	db.Close()
 
-	report, err := buildPlayerStatsReport(ctx, PlayerStatsReportOptions{DatabasePath: dbPath, Config: DefaultSuspicionConfig()})
+	report, err := buildPlayerStatsReport(ctx, PlayerStatsReportOptions{DatabasePath: dbPath, Config: DefaultSuspicionConfig(), IncludeEvidence: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +560,6 @@ func TestExportImportRoundtrip(t *testing.T) {
 		Players:    map[uint64]*DemoPlayerStats{steamID: {SteamID64: steamID, Name: "Alice", Rounds: 10, Shots: 50, HitShots: 25, DamageEvents: 20, HeadHitEvents: 5}},
 		Weapons:    map[uint64]map[string]*DemoWeaponStats{steamID: {"AK-47": {SteamID64: steamID, WeaponName: "AK-47", Shots: 50, HitShots: 25}}},
 		Encounters: []DemoEncounter{{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 150, ReactionTimeMS: 100, ConfirmedAngle: 3, WeaponName: "AK-47", Snap: true}},
-		Reactions:  []DemoReaction{{AttackerSteamID64: steamID, VictimSteamID64: 2, ReactionTimeMS: 100, WeaponName: "AK-47"}},
 		Evidence:   []DemoEvidence{{SteamID64: steamID, VictimID: 2, Kind: "test", Value: 1, Details: "{}"}},
 	}
 	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
@@ -608,11 +603,11 @@ func TestExportImportRoundtrip(t *testing.T) {
 		t.Fatalf("result = %+v, want 0/1", result)
 	}
 
-	original, err := buildPlayerStatsReport(ctx, PlayerStatsReportOptions{DatabasePath: sourcePath, Config: DefaultSuspicionConfig()})
+	original, err := buildPlayerStatsReport(ctx, PlayerStatsReportOptions{DatabasePath: sourcePath, Config: DefaultSuspicionConfig(), IncludeEvidence: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	imported, err := buildPlayerStatsReport(ctx, PlayerStatsReportOptions{DatabasePath: targetPath, Config: DefaultSuspicionConfig()})
+	imported, err := buildPlayerStatsReport(ctx, PlayerStatsReportOptions{DatabasePath: targetPath, Config: DefaultSuspicionConfig(), IncludeEvidence: true})
 	if err != nil {
 		t.Fatal(err)
 	}

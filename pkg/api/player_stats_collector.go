@@ -76,20 +76,6 @@ type DemoEncounter struct {
 	Snap              bool    `json:"snap"`
 }
 
-type DemoReaction struct {
-	RoundNumber       int     `json:"roundNumber"`
-	AttackerSteamID64 uint64  `json:"attackerSteamId"`
-	VictimSteamID64   uint64  `json:"victimSteamId"`
-	FirstSpottedTick  int     `json:"firstSpottedTick"`
-	ConfirmedTick     int     `json:"confirmedTick"`
-	ShotTick          int     `json:"shotTick"`
-	ReactionTimeMS    float64 `json:"reactionTimeMs"`
-	ConfirmedTimeMS   float64 `json:"confirmedTimeMs"`
-	FirstAngle        float64 `json:"firstAngle"`
-	ShotAngle         float64 `json:"shotAngle"`
-	WeaponName        string  `json:"weaponName"`
-}
-
 type DemoEvidence struct {
 	RoundNumber int     `json:"roundNumber"`
 	Tick        int     `json:"tick"`
@@ -142,7 +128,6 @@ type DemoWeaponStats struct {
 type DemoStats struct {
 	Players    map[uint64]*DemoPlayerStats            `json:"players"`
 	Encounters []DemoEncounter                        `json:"encounters"`
-	Reactions  []DemoReaction                         `json:"reactions"`
 	Evidence   []DemoEvidence                         `json:"evidence"`
 	Weapons    map[uint64]map[string]*DemoWeaponStats `json:"weapons"`
 }
@@ -488,12 +473,6 @@ func (c *demoStatsCollector) onShot(analyzer *Analyzer, shot *Shot) {
 		selected.firstShotTick = shot.Tick
 		selected.firstShotAngle = angularError(selectedAttacker, selectedTarget)
 		stats.FirstBulletEncounters++
-		c.result.Reactions = append(c.result.Reactions, DemoReaction{
-			RoundNumber: analyzer.currentRound.Number, AttackerSteamID64: selectedKey.attacker, VictimSteamID64: selectedKey.target,
-			FirstSpottedTick: selected.firstTick, ConfirmedTick: selected.confirmedTick, ShotTick: shot.Tick,
-			ReactionTimeMS: c.tickDeltaMS(analyzer, selected.firstTick, shot.Tick), ConfirmedTimeMS: c.tickDeltaMS(analyzer, selected.confirmedTick, shot.Tick),
-			FirstAngle: selected.firstAngle, ShotAngle: selected.firstShotAngle, WeaponName: shot.WeaponName.String(),
-		})
 		durationMS := c.tickDeltaMS(analyzer, selected.firstTick, shot.Tick)
 		if selected.firstAngle-selected.firstShotAngle >= 15 && durationMS <= 100 && selected.firstShotAngle <= 2 {
 			selected.snap = true

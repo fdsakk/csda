@@ -74,6 +74,8 @@ export type Demo = {
   enabled: boolean;
   qualityStatus: 'ok' | 'warning' | 'not_checked';
   qualityReason: 'systemic_low_timing' | string;
+  /** 'analyzed' = parsed from a .dem here, 'imported' = merged from a stats export */
+  origin: 'analyzed' | 'imported';
   players: number;
   rounds: number;
 };
@@ -94,7 +96,6 @@ export type PlayerWeapon = {
 export type Report = {
   players: Player[] | null;
   playersByWeapon: PlayerWeapon[] | null;
-  evidence: unknown[] | null;
   importedDemos: Demo[] | null;
 };
 
@@ -105,7 +106,7 @@ export type Job = {
   createdAt: string;
   startedAt?: string;
   endedAt?: string;
-  result?: { imported: number; skipped: number; failed: number };
+  result?: { imported: number; skipped: number; failed: number; errors?: { path: string; error: string }[] };
   error?: string;
   processed: number;
   total: number;
@@ -113,82 +114,59 @@ export type Job = {
   progress: number;
 };
 
-async function readJSON<T>(response: Response): Promise<T> {
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error ?? `Request failed: ${response.status}`);
-  return body as T;
-}
-
-export async function getReport(): Promise<Report> {
-  return readJSON<Report>(await fetch('/api/report'));
-}
-
-export async function getJobs(): Promise<Job[]> {
-  return readJSON<Job[]>(await fetch('/api/jobs'));
-}
-
-export async function setDemoEnabled(checksum: string, enabled: boolean): Promise<void> {
-  const response = await fetch(`/api/demos/${encodeURIComponent(checksum)}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled }),
-  });
+// Shared fetch wrapper: throws the server's {error} message on failure,
+// parses JSON on success (204 responses return undefined).
+async function request<T = void>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, init);
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: undefined }));
     throw new Error(body.error ?? `Request failed: ${response.status}`);
   }
+  return response.status === 204 ? (undefined as T) : response.json();
 }
 
-export async function setAllDemosEnabled(enabled: boolean): Promise<void> {
-  const response = await fetch('/api/demos', {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled }),
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: undefined }));
-    throw new Error(body.error ?? `Request failed: ${response.status}`);
-  }
+function patchJSON(body: unknown): RequestInit {
+  return { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-export async function clearUploads(): Promise<void> {
-  const response = await fetch('/api/uploads', { method: 'DELETE' });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: undefined }));
-    throw new Error(body.error ?? `Request failed: ${response.status}`);
-  }
+export function getReport(): Promise<Report> {
+  return request<Report>('/api/report');
 }
 
-export async function deleteDemo(checksum: string): Promise<void> {
-  const response = await fetch(`/api/demos/${encodeURIComponent(checksum)}`, { method: 'DELETE' });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: undefined }));
-    throw new Error(body.error ?? `Request failed: ${response.status}`);
-  }
+export function getJobs(): Promise<Job[]> {
+  return request<Job[]>('/api/jobs');
 }
 
-export async function setPlayerSaved(steamId: string, saved: boolean): Promise<void> {
-  return patchPlayer(steamId, { saved });
+export function deleteJob(id: string): Promise<void> {
+  return request(`/api/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
-export async function setPlayerBanned(steamId: string, banned: boolean): Promise<void> {
-  return patchPlayer(steamId, { banned });
+export function setDemoEnabled(checksum: string, enabled: boolean): Promise<void> {
+  return request(`/api/demos/${encodeURIComponent(checksum)}`, patchJSON({ enabled }));
 }
 
-async function patchPlayer(steamId: string, body: { saved?: boolean; banned?: boolean }): Promise<void> {
-  const response = await fetch(`/api/players/${encodeURIComponent(steamId)}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({ error: undefined }));
-    throw new Error(payload.error ?? `Request failed: ${response.status}`);
-  }
+export function setAllDemosEnabled(enabled: boolean): Promise<void> {
+  return request('/api/demos', patchJSON({ enabled }));
 }
 
-export async function importStats(file: File): Promise<{ imported: number; skipped: number }> {
-  return readJSON(await fetch('/api/import', { method: 'POST', body: file }));
+export function clearUploads(): Promise<void> {
+  return request('/api/uploads', { method: 'DELETE' });
+}
+
+export function deleteDemo(checksum: string): Promise<void> {
+  return request(`/api/demos/${encodeURIComponent(checksum)}`, { method: 'DELETE' });
+}
+
+export function setPlayerSaved(steamId: string, saved: boolean): Promise<void> {
+  return request(`/api/players/${encodeURIComponent(steamId)}`, patchJSON({ saved }));
+}
+
+export function setPlayerBanned(steamId: string, banned: boolean): Promise<void> {
+  return request(`/api/players/${encodeURIComponent(steamId)}`, patchJSON({ banned }));
+}
+
+export function importStats(file: File): Promise<{ imported: number; skipped: number }> {
+  return request('/api/import', { method: 'POST', body: file });
 }
 
 export function uploadDemos(files: File[], onProgress: (progress: number) => void): Promise<Job> {

@@ -45,13 +45,13 @@ csda stats ingest --db=player-stats.db --demo=match1.dem --demo-dir=./demos
 csda stats report --db=player-stats.db --output=./stats-report --format=csv
 ```
 
-`stats build` combines both operations. The report contains aggregated player and weapon statistics, estimated Time to Damage (TTD), estimated Reaction Time, a configurable suspicion score, and evidence rows pointing to demo rounds and ticks. The score is intended to prioritize manual review; it is not an automatic cheating verdict.
+`stats build` combines both operations. The report contains aggregated player and weapon statistics, estimated Time to Damage (TTD), estimated Reaction Time, a two-tier status per player (`watch` = grey zone, `cheater` = not humanly reproducible over many games), and evidence rows pointing to demo rounds and ticks. The status is intended to prioritize manual review; it is not an automatic cheating verdict.
 
 TTD measures the first spotted tick to first damage. Reaction Time measures the first spotted tick to first shot. In both cases three consecutive spotted ticks are required to validate the exposure, but timing starts at the first tick; samples outside `0–1000 ms` are excluded. The primary multi-demo value is the round-weighted average of each demo's median, while pooled median and P10 remain available in JSON/CSV. These are demo-derived estimates, not geometry-backed line-of-sight measurements.
 
 Each analyzed demo also receives a conservative timing-quality check. If low TTD and reaction medians appear across at least four sufficiently sampled players, the demo is automatically disabled in aggregates. It remains visible in the Demos dialog and can be manually enabled. Existing databases are checked once during migration.
 
-Use `--config=thresholds.json` to override fields returned by `api.DefaultSuspicionConfig()`. A player receives a score after at least three demos and 100 firearm shots by default.
+Use `--config=thresholds.json` (or `csda web --suspicion-config=thresholds.json`) to override fields returned by `api.DefaultSuspicionConfig()`. A player receives a status after at least three demos and 100 firearm shots by default.
 
 ### Local React dashboard
 
@@ -65,7 +65,22 @@ cd ..
 csda web --db=player-stats.db --uploads=uploads --assets=web/dist --source=valve
 ```
 
-Open `http://127.0.0.1:8080`. Drop one or more `.dem` files into the upload area; uploads are stored under `uploads`, analyzed sequentially in the background, deduplicated by checksum, and added to the same SQLite player database. The table refreshes automatically after each completed job.
+Open `http://127.0.0.1:8080`. Drop one or more `.dem` files into the upload area; uploads are analyzed sequentially in the background, deduplicated by checksum, and added to the same SQLite player database. Job progress is streamed over Server-Sent Events and the table refreshes automatically after each completed job; failed jobs stay listed with their error until dismissed.
+
+Uploaded `.dem` files are deleted automatically once their analysis finishes — the statistics live in the database. Re-analyzing a demo after an algorithm update therefore requires uploading the file again.
+
+The Demos dialog distinguishes demos analyzed from a `.dem` file on this instance (`Analyzed`) from demos merged in through a stats export (`Imported`).
+
+#### Authentication
+
+The web UI is unauthenticated by default and binds to `127.0.0.1`. To protect an instance exposed to a network, set both variables (see `.env.example`; Docker Compose picks up a `.env` file automatically):
+
+```bash
+CSDA_AUTH_USER=admin
+CSDA_AUTH_PASSWORD=change-me
+```
+
+The browser then shows its standard login prompt (HTTP Basic Auth). Only `/api/health` stays open for container health checks. Use HTTPS (e.g. a reverse proxy) when exposing the instance beyond a trusted network, as Basic Auth sends credentials with every request.
 
 ## API
 

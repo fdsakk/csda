@@ -70,9 +70,9 @@ type SuspicionConfig struct {
 	// line the aim is not humanly reproducible over many games; the grey band
 	// above it only flags red when the supporting stats are also elite. AWP
 	// kills are excluded — the AWP is a one-shot weapon and has its own tier.
-	TTDCheaterMS       float64 `json:"ttdCheaterMs"`       // < this → cheater outright
-	TTDSuspiciousMS    float64 `json:"ttdSuspiciousMs"`    // < this → at least watch, cheater if stats elite
-	ReactionCheaterMS  float64 `json:"reactionCheaterMs"`  // non-AWP reaction weighted avg below this → cheater
+	TTDCheaterMS      float64 `json:"ttdCheaterMs"`      // < this → cheater outright
+	TTDSuspiciousMS   float64 `json:"ttdSuspiciousMs"`   // < this → at least watch, cheater if stats elite
+	ReactionCheaterMS float64 `json:"reactionCheaterMs"` // non-AWP reaction weighted avg below this → cheater
 
 	// AWP-only time-to-damage tier, applied to AWPers. Single flick + one-shot
 	// kill makes AWP TTD naturally lower, so it gets its own, lower thresholds.
@@ -81,28 +81,28 @@ type SuspicionConfig struct {
 
 	// "Elite supporting stats" — any one of these promotes a suspicious-band
 	// TTD (TTDCheaterMS..TTDSuspiciousMS) from watch to cheater.
-	EliteKD           float64 `json:"eliteKd"`
-	EliteHeadHitRate  float64 `json:"eliteHeadHitRate"`
-	EliteAccuracy     float64 `json:"eliteAccuracy"`
+	EliteKD          float64 `json:"eliteKd"`
+	EliteHeadHitRate float64 `json:"eliteHeadHitRate"`
+	EliteAccuracy    float64 `json:"eliteAccuracy"`
 
 	// Head-hit-rate standalone flags, gated by a minimum damage-event sample.
-	HeadHitMinimumEvents   int     `json:"headHitMinimumEvents"`
-	HeadHitWatchThreshold  float64 `json:"headHitWatchThreshold"`  // >= this → watch
+	HeadHitMinimumEvents    int     `json:"headHitMinimumEvents"`
+	HeadHitWatchThreshold   float64 `json:"headHitWatchThreshold"`   // >= this → watch
 	HeadHitCheaterThreshold float64 `json:"headHitCheaterThreshold"` // >= this → cheater
 }
 
 func DefaultSuspicionConfig() SuspicionConfig {
 	return SuspicionConfig{
 		MinimumDemos: 3, MinimumShots: 100,
-		TTDMinimumSamples: 20,
-		TTDCheaterMS:      320,
-		TTDSuspiciousMS:   360,
-		ReactionCheaterMS: 200,
-		AWPTTDCheaterMS:   210,
-		AWPTTDWatchMS:     280,
-		EliteKD:           1.8,
-		EliteHeadHitRate:  .40,
-		EliteAccuracy:     .30,
+		TTDMinimumSamples:       20,
+		TTDCheaterMS:            320,
+		TTDSuspiciousMS:         360,
+		ReactionCheaterMS:       200,
+		AWPTTDCheaterMS:         210,
+		AWPTTDWatchMS:           280,
+		EliteKD:                 1.8,
+		EliteHeadHitRate:        .40,
+		EliteAccuracy:           .30,
 		HeadHitMinimumEvents:    30,
 		HeadHitWatchThreshold:   .50,
 		HeadHitCheaterThreshold: .60,
@@ -114,6 +114,10 @@ type PlayerStatsReportOptions struct {
 	OutputPath   string
 	Format       constants.ExportFormat
 	Config       SuspicionConfig
+	// IncludeEvidence adds per-event evidence rows to the report. The web UI
+	// never reads them, so the /api/report endpoint leaves this off; file
+	// exports enable it.
+	IncludeEvidence bool
 }
 
 func openPlayerStatsDB(path string) (*sql.DB, error) {
@@ -150,7 +154,8 @@ CREATE TABLE IF NOT EXISTS demos (
   source TEXT NOT NULL, analysis_version INTEGER NOT NULL, imported_at TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
   quality_status TEXT NOT NULL DEFAULT 'not_checked',
-  quality_reason TEXT NOT NULL DEFAULT ''
+  quality_reason TEXT NOT NULL DEFAULT '',
+  origin TEXT NOT NULL DEFAULT 'analyzed'
 );
 CREATE TABLE IF NOT EXISTS players (
   steam_id INTEGER PRIMARY KEY, latest_name TEXT NOT NULL, names TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -182,14 +187,7 @@ CREATE TABLE IF NOT EXISTS encounters (
   distance_meters REAL NOT NULL, weapon_name TEXT NOT NULL, snap INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS encounters_attacker_idx ON encounters(attacker_steam_id);
-CREATE TABLE IF NOT EXISTS reactions (
-  id INTEGER PRIMARY KEY, demo_id INTEGER NOT NULL REFERENCES demos(id) ON DELETE CASCADE,
-  round_number INTEGER NOT NULL, attacker_steam_id INTEGER NOT NULL, victim_steam_id INTEGER NOT NULL,
-  first_spotted_tick INTEGER NOT NULL, confirmed_tick INTEGER NOT NULL, shot_tick INTEGER NOT NULL,
-  reaction_time_ms REAL NOT NULL, confirmed_time_ms REAL NOT NULL,
-  first_angle REAL NOT NULL, shot_angle REAL NOT NULL, weapon_name TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS reactions_attacker_idx ON reactions(attacker_steam_id);
+CREATE INDEX IF NOT EXISTS encounters_demo_idx ON encounters(demo_id);
 CREATE TABLE IF NOT EXISTS player_demo_weapon_stats (
   demo_id INTEGER NOT NULL REFERENCES demos(id) ON DELETE CASCADE,
   steam_id INTEGER NOT NULL REFERENCES players(steam_id) ON DELETE CASCADE,
@@ -203,6 +201,7 @@ CREATE TABLE IF NOT EXISTS evidence (
   victim_steam_id INTEGER NOT NULL, kind TEXT NOT NULL, value REAL NOT NULL, details TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS evidence_player_idx ON evidence(steam_id);
+CREATE INDEX IF NOT EXISTS evidence_demo_idx ON evidence(demo_id);
 INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, CURRENT_TIMESTAMP);
 `)
 	if err != nil {
@@ -245,6 +244,7 @@ INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, CURRENT_
 		{"players", "banned", `INTEGER NOT NULL DEFAULT 0`},
 		{"demos", "quality_status", `TEXT NOT NULL DEFAULT 'not_checked'`},
 		{"demos", "quality_reason", `TEXT NOT NULL DEFAULT ''`},
+		{"demos", "origin", `TEXT NOT NULL DEFAULT 'analyzed'`},
 	}
 	for _, column := range addedColumns {
 		exists, checkErr := sqliteColumnExists(db, column[0], column[1])
@@ -257,7 +257,12 @@ INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, CURRENT_
 			}
 		}
 	}
-	_, err = db.Exec(`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, CURRENT_TIMESTAMP), (3, CURRENT_TIMESTAMP), (4, CURRENT_TIMESTAMP), (5, CURRENT_TIMESTAMP), (6, CURRENT_TIMESTAMP)`)
+	// The reactions table was write-only: reaction stats are derived from
+	// encounters.reaction_time_ms, so nothing ever read it back.
+	if _, err = db.Exec(`DROP TABLE IF EXISTS reactions`); err != nil {
+		return err
+	}
+	_, err = db.Exec(`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, CURRENT_TIMESTAMP), (3, CURRENT_TIMESTAMP), (4, CURRENT_TIMESTAMP), (5, CURRENT_TIMESTAMP), (6, CURRENT_TIMESTAMP), (7, CURRENT_TIMESTAMP)`)
 	if err != nil {
 		return err
 	}
@@ -474,7 +479,7 @@ func storeAnalyzedDemo(ctx context.Context, db *sql.DB, match *Match, stats Demo
 		return err
 	}
 	enabled := quality.Status != demoQualityStatusWarning
-	res, err := tx.ExecContext(ctx, `INSERT INTO demos(checksum,path,file_name,map_name,demo_date,tick_rate,build_number,source,analysis_version,imported_at,enabled,quality_status,quality_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	res, err := tx.ExecContext(ctx, `INSERT INTO demos(checksum,path,file_name,map_name,demo_date,tick_rate,build_number,source,analysis_version,imported_at,enabled,quality_status,quality_reason,origin) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'analyzed')`,
 		match.Checksum, match.DemoFilePath, match.DemoFileName, match.MapName, match.Date.UTC().Format(time.RFC3339), match.TickRate, match.BuildNumber, match.Source.String(), playerStatsAnalysisVersion, time.Now().UTC().Format(time.RFC3339), enabled, quality.Status, quality.Reason)
 	if err != nil {
 		return err
@@ -506,30 +511,37 @@ func storeAnalyzedDemo(ctx context.Context, db *sql.DB, match *Match, stats Demo
 			return err
 		}
 	}
+	insertEncounter, err := tx.PrepareContext(ctx, `INSERT INTO encounters(demo_id,round_number,attacker_steam_id,victim_steam_id,first_spotted_tick,confirmed_tick,damage_tick,ttd_ms,ttd_confirmed_ms,first_shot_time_ms,reaction_time_ms,first_angle,confirmed_angle,first_shot_angle,distance_meters,weapon_name,snap) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer insertEncounter.Close()
 	for _, e := range stats.Encounters {
-		_, err = tx.ExecContext(ctx, `INSERT INTO encounters(demo_id,round_number,attacker_steam_id,victim_steam_id,first_spotted_tick,confirmed_tick,damage_tick,ttd_ms,ttd_confirmed_ms,first_shot_time_ms,reaction_time_ms,first_angle,confirmed_angle,first_shot_angle,distance_meters,weapon_name,snap) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			demoID, e.RoundNumber, e.AttackerSteamID64, e.VictimSteamID64, e.FirstSpottedTick, e.ConfirmedTick, e.DamageTick, e.TTDMS, e.TTDConfirmedMS, e.FirstShotTimeMS, e.ReactionTimeMS, e.FirstAngle, e.ConfirmedAngle, e.FirstShotAngle, e.DistanceMeters, e.WeaponName, e.Snap)
+		_, err = insertEncounter.ExecContext(ctx, demoID, e.RoundNumber, e.AttackerSteamID64, e.VictimSteamID64, e.FirstSpottedTick, e.ConfirmedTick, e.DamageTick, e.TTDMS, e.TTDConfirmedMS, e.FirstShotTimeMS, e.ReactionTimeMS, e.FirstAngle, e.ConfirmedAngle, e.FirstShotAngle, e.DistanceMeters, e.WeaponName, e.Snap)
 		if err != nil {
 			return err
 		}
 	}
-	for _, reaction := range stats.Reactions {
-		_, err = tx.ExecContext(ctx, `INSERT INTO reactions(demo_id,round_number,attacker_steam_id,victim_steam_id,first_spotted_tick,confirmed_tick,shot_tick,reaction_time_ms,confirmed_time_ms,first_angle,shot_angle,weapon_name) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-			demoID, reaction.RoundNumber, reaction.AttackerSteamID64, reaction.VictimSteamID64, reaction.FirstSpottedTick, reaction.ConfirmedTick, reaction.ShotTick, reaction.ReactionTimeMS, reaction.ConfirmedTimeMS, reaction.FirstAngle, reaction.ShotAngle, reaction.WeaponName)
-		if err != nil {
-			return err
-		}
+	insertWeapon, err := tx.PrepareContext(ctx, `INSERT INTO player_demo_weapon_stats(demo_id,steam_id,weapon_name,shots,hit_shots,damage_events,head_hit_events,kills) VALUES(?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return err
 	}
+	defer insertWeapon.Close()
 	for steamID, weapons := range stats.Weapons {
 		for _, w := range weapons {
-			_, err = tx.ExecContext(ctx, `INSERT INTO player_demo_weapon_stats(demo_id,steam_id,weapon_name,shots,hit_shots,damage_events,head_hit_events,kills) VALUES(?,?,?,?,?,?,?,?)`, demoID, steamID, w.WeaponName, w.Shots, w.HitShots, w.DamageEvents, w.HeadHitEvents, w.Kills)
+			_, err = insertWeapon.ExecContext(ctx, demoID, steamID, w.WeaponName, w.Shots, w.HitShots, w.DamageEvents, w.HeadHitEvents, w.Kills)
 			if err != nil {
 				return err
 			}
 		}
 	}
+	insertEvidence, err := tx.PrepareContext(ctx, `INSERT INTO evidence(demo_id,round_number,tick,steam_id,victim_steam_id,kind,value,details) VALUES(?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer insertEvidence.Close()
 	for _, e := range stats.Evidence {
-		_, err = tx.ExecContext(ctx, `INSERT INTO evidence(demo_id,round_number,tick,steam_id,victim_steam_id,kind,value,details) VALUES(?,?,?,?,?,?,?,?)`, demoID, e.RoundNumber, e.Tick, e.SteamID64, e.VictimID, e.Kind, e.Value, e.Details)
+		_, err = insertEvidence.ExecContext(ctx, demoID, e.RoundNumber, e.Tick, e.SteamID64, e.VictimID, e.Kind, e.Value, e.Details)
 		if err != nil {
 			return err
 		}

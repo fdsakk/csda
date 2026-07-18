@@ -10,6 +10,9 @@ node_modules
 /debug/*.json
 .vscode/launch.json
 
+# local secrets (see .env.example)
+.env
+
 # runtime artifacts
 /tris/
 /csda

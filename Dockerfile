@@ -17,11 +17,12 @@ RUN pip install --no-cache-dir awpy==2.0.2 \
 
 # 3. Build the Go server (pure Go sqlite driver -> static binary, no CGO)
 FROM golang:1.23 AS server
+ARG VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/csda ./cmd/cli
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X github.com/akiver/cs-demo-analyzer/pkg/cli.Version=${VERSION}" -o /out/csda ./cmd/cli
 
 # 4. Minimal runtime image
 FROM gcr.io/distroless/static-debian12

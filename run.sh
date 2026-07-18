@@ -5,6 +5,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# Load local settings (e.g. CSDA_AUTH_USER / CSDA_AUTH_PASSWORD), if present.
+if [ -f .env ]; then
+  set -a
+  . ./.env
+  set +a
+fi
+
 # Pick a package manager for the frontend build.
 if command -v bun >/dev/null 2>&1; then
   PM=bun

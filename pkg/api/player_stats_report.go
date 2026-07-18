@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -28,47 +29,47 @@ type PlayerSuspicionRule struct {
 }
 
 type PlayerStatsReportRow struct {
-	SteamID64             uint64   `json:"steamId"`
-	Name                  string   `json:"name"`
-	Names                 []string `json:"names"`
-	DemoCount             int      `json:"demoCount"`
-	Rounds                int      `json:"rounds"`
-	Shots                 int      `json:"shots"`
-	HitShots              int      `json:"hitShots"`
-	Accuracy              float64  `json:"accuracy"`
-	DamageEvents          int      `json:"damageEvents"`
-	HeadHitEvents         int      `json:"headHitEvents"`
-	HeadHitRate           float64  `json:"headHitRate"`
-	Kills                 int      `json:"kills"`
-	Deaths                int      `json:"deaths"`
-	HeadshotKills         int      `json:"headshotKills"`
-	HeadshotKillRate      float64  `json:"headshotKillRate"`
-	SmokeKills            int      `json:"smokeKills"`
-	WallKills             int      `json:"wallKills"`
-	UnspottedDamageEvents int      `json:"unspottedDamageEvents"`
-	UnspottedDamageRate   float64  `json:"unspottedDamageRate"`
-	FirstBulletEncounters int      `json:"firstBulletEncounters"`
-	FirstBulletHeadHits   int      `json:"firstBulletHeadHits"`
-	FirstBulletHeadRate   float64  `json:"firstBulletHeadRate"`
-	SnapEvents            int      `json:"snapEvents"`
-	SnapRate              float64  `json:"snapRate"`
-	TTDSamples            int      `json:"ttdSamples"`
-	TTDMeanMS             float64  `json:"ttdMeanMs"`
-	TTDMedianMS           float64  `json:"ttdMedianMs"`
-	TTDWeightedMS         float64  `json:"ttdWeightedMs"`
-	TTDP10MS              float64  `json:"ttdP10Ms"`
-	TTDUnder190Rate       float64  `json:"ttdUnder190Rate"`
-	AWPKills              int      `json:"awpKills"`
-	AWPKillRate           float64  `json:"awpKillRate"`
-	IsAWPer               bool     `json:"isAwper"`
-	AWPTTDSamples         int      `json:"awpTtdSamples"`
-	AWPTTDMedianMS        float64  `json:"awpTtdMedianMs"`
-	AWPTTDWeightedMS      float64  `json:"awpTtdWeightedMs"`
-	NonAWPTTDSamples      int      `json:"nonAwpTtdSamples"`
-	NonAWPTTDMedianMS     float64  `json:"nonAwpTtdMedianMs"`
-	NonAWPTTDWeightedMS   float64  `json:"nonAwpTtdWeightedMs"`
-	NonAWPReactionSamples    int   `json:"nonAwpReactionSamples"`
-	NonAWPReactionWeightedMS float64 `json:"nonAwpReactionWeightedMs"`
+	SteamID64                uint64   `json:"steamId"`
+	Name                     string   `json:"name"`
+	Names                    []string `json:"names"`
+	DemoCount                int      `json:"demoCount"`
+	Rounds                   int      `json:"rounds"`
+	Shots                    int      `json:"shots"`
+	HitShots                 int      `json:"hitShots"`
+	Accuracy                 float64  `json:"accuracy"`
+	DamageEvents             int      `json:"damageEvents"`
+	HeadHitEvents            int      `json:"headHitEvents"`
+	HeadHitRate              float64  `json:"headHitRate"`
+	Kills                    int      `json:"kills"`
+	Deaths                   int      `json:"deaths"`
+	HeadshotKills            int      `json:"headshotKills"`
+	HeadshotKillRate         float64  `json:"headshotKillRate"`
+	SmokeKills               int      `json:"smokeKills"`
+	WallKills                int      `json:"wallKills"`
+	UnspottedDamageEvents    int      `json:"unspottedDamageEvents"`
+	UnspottedDamageRate      float64  `json:"unspottedDamageRate"`
+	FirstBulletEncounters    int      `json:"firstBulletEncounters"`
+	FirstBulletHeadHits      int      `json:"firstBulletHeadHits"`
+	FirstBulletHeadRate      float64  `json:"firstBulletHeadRate"`
+	SnapEvents               int      `json:"snapEvents"`
+	SnapRate                 float64  `json:"snapRate"`
+	TTDSamples               int      `json:"ttdSamples"`
+	TTDMeanMS                float64  `json:"ttdMeanMs"`
+	TTDMedianMS              float64  `json:"ttdMedianMs"`
+	TTDWeightedMS            float64  `json:"ttdWeightedMs"`
+	TTDP10MS                 float64  `json:"ttdP10Ms"`
+	TTDUnder190Rate          float64  `json:"ttdUnder190Rate"`
+	AWPKills                 int      `json:"awpKills"`
+	AWPKillRate              float64  `json:"awpKillRate"`
+	IsAWPer                  bool     `json:"isAwper"`
+	AWPTTDSamples            int      `json:"awpTtdSamples"`
+	AWPTTDMedianMS           float64  `json:"awpTtdMedianMs"`
+	AWPTTDWeightedMS         float64  `json:"awpTtdWeightedMs"`
+	NonAWPTTDSamples         int      `json:"nonAwpTtdSamples"`
+	NonAWPTTDMedianMS        float64  `json:"nonAwpTtdMedianMs"`
+	NonAWPTTDWeightedMS      float64  `json:"nonAwpTtdWeightedMs"`
+	NonAWPReactionSamples    int      `json:"nonAwpReactionSamples"`
+	NonAWPReactionWeightedMS float64  `json:"nonAwpReactionWeightedMs"`
 	// 20 bins of 50ms across 0–1000ms, for the UI distribution charts.
 	TTDHistogram         []int                 `json:"ttdHistogram"`
 	ReactionHistogram    []int                 `json:"reactionHistogram"`
@@ -158,8 +159,11 @@ type ImportedDemoReportRow struct {
 	Enabled         bool    `json:"enabled"`
 	QualityStatus   string  `json:"qualityStatus"`
 	QualityReason   string  `json:"qualityReason"`
-	Players         int     `json:"players"`
-	Rounds          int     `json:"rounds"`
+	// Origin is "analyzed" for demos parsed from a .dem file on this instance
+	// and "imported" for demos merged in from a stats export.
+	Origin  string `json:"origin"`
+	Players int    `json:"players"`
+	Rounds  int    `json:"rounds"`
 }
 
 type PlayerStatsReport struct {
@@ -234,6 +238,134 @@ func roundWeightedDemoMedian(groups map[int64]*demoSamples) float64 {
 	return weighted / float64(rounds)
 }
 
+// playerEncounterSamples accumulates one player's encounter timings so the
+// report can compute all encounter-derived stats from a single query pass.
+type playerEncounterSamples struct {
+	ttd, reaction                    []float64
+	awpTTD, nonAWPTTD                []float64
+	nonAWPReaction                   []float64
+	crosshairAngles, firstShotAngles []float64
+	ttdByDemo, reactionByDemo        map[int64]*demoSamples
+	awpTTDByDemo, nonAWPTTDByDemo    map[int64]*demoSamples
+	nonAWPReactionByDemo             map[int64]*demoSamples
+	under190                         int
+}
+
+func newPlayerEncounterSamples() *playerEncounterSamples {
+	return &playerEncounterSamples{
+		ttdByDemo:            make(map[int64]*demoSamples),
+		reactionByDemo:       make(map[int64]*demoSamples),
+		awpTTDByDemo:         make(map[int64]*demoSamples),
+		nonAWPTTDByDemo:      make(map[int64]*demoSamples),
+		nonAWPReactionByDemo: make(map[int64]*demoSamples),
+	}
+}
+
+func (s *playerEncounterSamples) add(demoID int64, rounds int, ttd, reaction, crosshairAngle, firstShotAngle float64, isAWP bool) {
+	if ttd >= 0 && ttd <= 1000 {
+		s.ttd = append(s.ttd, ttd)
+		appendDemoSample(s.ttdByDemo, demoID, rounds, ttd)
+		s.crosshairAngles = append(s.crosshairAngles, crosshairAngle)
+		if firstShotAngle > 0 {
+			s.firstShotAngles = append(s.firstShotAngles, firstShotAngle)
+		}
+		if ttd <= 190 {
+			s.under190++
+		}
+		if isAWP {
+			s.awpTTD = append(s.awpTTD, ttd)
+			appendDemoSample(s.awpTTDByDemo, demoID, rounds, ttd)
+		} else {
+			s.nonAWPTTD = append(s.nonAWPTTD, ttd)
+			appendDemoSample(s.nonAWPTTDByDemo, demoID, rounds, ttd)
+		}
+	}
+	// reaction_time_ms is -1 on rows stored before the column existed
+	if reaction >= 0 && reaction <= 1000 {
+		s.reaction = append(s.reaction, reaction)
+		appendDemoSample(s.reactionByDemo, demoID, rounds, reaction)
+		if !isAWP {
+			s.nonAWPReaction = append(s.nonAWPReaction, reaction)
+			appendDemoSample(s.nonAWPReactionByDemo, demoID, rounds, reaction)
+		}
+	}
+}
+
+func (s *playerEncounterSamples) apply(row *PlayerStatsReportRow) {
+	row.TTDHistogram = histogramMS(s.ttd)
+	row.ReactionHistogram = histogramMS(s.reaction)
+	row.TTDSamples = len(s.ttd)
+	row.TTDMedianMS = percentile(s.ttd, .5)
+	row.TTDWeightedMS = roundWeightedDemoMedian(s.ttdByDemo)
+	row.TTDP10MS = percentile(s.ttd, .1)
+	row.TTDUnder190Rate = ratio(s.under190, len(s.ttd))
+	row.AWPTTDSamples = len(s.awpTTD)
+	row.AWPTTDMedianMS = percentile(s.awpTTD, .5)
+	row.AWPTTDWeightedMS = roundWeightedDemoMedian(s.awpTTDByDemo)
+	if row.AWPTTDWeightedMS == 0 {
+		row.AWPTTDWeightedMS = row.AWPTTDMedianMS
+	}
+	row.NonAWPTTDSamples = len(s.nonAWPTTD)
+	row.NonAWPTTDMedianMS = percentile(s.nonAWPTTD, .5)
+	row.NonAWPTTDWeightedMS = roundWeightedDemoMedian(s.nonAWPTTDByDemo)
+	if row.NonAWPTTDWeightedMS == 0 {
+		row.NonAWPTTDWeightedMS = row.NonAWPTTDMedianMS
+	}
+	row.NonAWPReactionSamples = len(s.nonAWPReaction)
+	row.NonAWPReactionWeightedMS = roundWeightedDemoMedian(s.nonAWPReactionByDemo)
+	if row.NonAWPReactionWeightedMS == 0 {
+		row.NonAWPReactionWeightedMS = percentile(s.nonAWPReaction, .5)
+	}
+	for _, value := range s.ttd {
+		row.TTDMeanMS += value
+	}
+	if row.TTDSamples > 0 {
+		row.TTDMeanMS /= float64(row.TTDSamples)
+	}
+	row.CrosshairMedianAngle = percentile(s.crosshairAngles, .5)
+	row.FirstShotMedianAngle = percentile(s.firstShotAngles, .5)
+
+	row.ReactionSamples = len(s.reaction)
+	row.ReactionMedianMS = percentile(s.reaction, .5)
+	row.ReactionWeightedMS = roundWeightedDemoMedian(s.reactionByDemo)
+	row.ReactionP10MS = percentile(s.reaction, .1)
+	if row.TTDWeightedMS == 0 {
+		row.TTDWeightedMS = row.TTDMedianMS
+	}
+	if row.ReactionWeightedMS == 0 {
+		row.ReactionWeightedMS = row.ReactionMedianMS
+	}
+}
+
+// collectEncounterSamples reads every enabled demo's encounters once and
+// groups them per attacker, instead of one query per player.
+func collectEncounterSamples(ctx context.Context, db *sql.DB) (map[uint64]*playerEncounterSamples, error) {
+	rows, err := db.QueryContext(ctx, `SELECT e.attacker_steam_id,e.demo_id,s.rounds,e.ttd_ms,e.reaction_time_ms,e.confirmed_angle,e.first_shot_angle,e.weapon_name FROM encounters e JOIN player_demo_stats s ON s.demo_id=e.demo_id AND s.steam_id=e.attacker_steam_id JOIN demos d ON d.id=e.demo_id AND d.enabled=1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	awpName := constants.WeaponAWP.String()
+	byPlayer := make(map[uint64]*playerEncounterSamples)
+	for rows.Next() {
+		var steamID uint64
+		var demoID int64
+		var rounds int
+		var ttd, reaction, crosshairAngle, firstShotAngle float64
+		var weaponName string
+		if err := rows.Scan(&steamID, &demoID, &rounds, &ttd, &reaction, &crosshairAngle, &firstShotAngle, &weaponName); err != nil {
+			return nil, err
+		}
+		samples := byPlayer[steamID]
+		if samples == nil {
+			samples = newPlayerEncounterSamples()
+			byPlayer[steamID] = samples
+		}
+		samples.add(demoID, rounds, ttd, reaction, crosshairAngle, firstShotAngle, weaponName == awpName)
+	}
+	return byPlayer, rows.Err()
+}
+
 // promote keeps the worst tier seen so far. cheater > watch > normal.
 func promote(current, next string) string {
 	rank := map[string]int{"normal": 0, "watch": 1, "cheater": 2}
@@ -248,10 +380,10 @@ func promote(current, next string) string {
 //
 // Rifle/pistol (non-AWP) time-to-damage, read as a long-term average:
 //
-//	 360+ ms   normal
-//	 320-360   suspicious | watch, or cheater if the player is also fragging
-//	                        hard (K/D, head-accuracy or accuracy elite)
-//	 < 320     not humanly reproducible over many games | cheater
+//	360+ ms   normal
+//	320-360   suspicious | watch, or cheater if the player is also fragging
+//	                       hard (K/D, head-accuracy or accuracy elite)
+//	< 320     not humanly reproducible over many games | cheater
 //
 // AWP TTD is excluded from the above (one flick + one-shot kill makes it
 // naturally lower). It gets its own, lower tier for anyone with enough AWP
@@ -372,106 +504,17 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
+	samplesByPlayer, err := collectEncounterSamples(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	for index := range report.Players {
 		row := &report.Players[index]
-		ttdRows, qerr := db.QueryContext(ctx, `SELECT e.demo_id,s.rounds,e.ttd_ms,e.reaction_time_ms,e.confirmed_angle,e.first_shot_angle,e.weapon_name FROM encounters e JOIN player_demo_stats s ON s.demo_id=e.demo_id AND s.steam_id=e.attacker_steam_id JOIN demos d ON d.id=e.demo_id AND d.enabled=1 WHERE e.attacker_steam_id=? ORDER BY e.ttd_ms`, row.SteamID64)
-		if qerr != nil {
-			return nil, qerr
+		samples := samplesByPlayer[row.SteamID64]
+		if samples == nil {
+			samples = &playerEncounterSamples{}
 		}
-		var ttdSamples []float64
-		var reactionSamples []float64
-		var awpTTDSamples, nonAWPTTDSamples []float64
-		var crosshairAngles, firstShotAngles []float64
-		ttdByDemo := make(map[int64]*demoSamples)
-		reactionByDemo := make(map[int64]*demoSamples)
-		awpTTDByDemo := make(map[int64]*demoSamples)
-		nonAWPTTDByDemo := make(map[int64]*demoSamples)
-		nonAWPReactionByDemo := make(map[int64]*demoSamples)
-		var nonAWPReactionSamples []float64
-		under190 := 0
-		for ttdRows.Next() {
-			var demoID int64
-			var rounds int
-			var value, reaction float64
-			var crosshairAngle, firstShotAngle float64
-			var weaponName string
-			if err := ttdRows.Scan(&demoID, &rounds, &value, &reaction, &crosshairAngle, &firstShotAngle, &weaponName); err != nil {
-				ttdRows.Close()
-				return nil, err
-			}
-			isAWP := weaponName == constants.WeaponAWP.String()
-			if value >= 0 && value <= 1000 {
-				ttdSamples = append(ttdSamples, value)
-				appendDemoSample(ttdByDemo, demoID, rounds, value)
-				crosshairAngles = append(crosshairAngles, crosshairAngle)
-				if firstShotAngle > 0 {
-					firstShotAngles = append(firstShotAngles, firstShotAngle)
-				}
-				if value <= 190 {
-					under190++
-				}
-				if isAWP {
-					awpTTDSamples = append(awpTTDSamples, value)
-					appendDemoSample(awpTTDByDemo, demoID, rounds, value)
-				} else {
-					nonAWPTTDSamples = append(nonAWPTTDSamples, value)
-					appendDemoSample(nonAWPTTDByDemo, demoID, rounds, value)
-				}
-			}
-			// reaction_time_ms is -1 on rows stored before the column existed
-			if reaction >= 0 && reaction <= 1000 {
-				reactionSamples = append(reactionSamples, reaction)
-				appendDemoSample(reactionByDemo, demoID, rounds, reaction)
-				if !isAWP {
-					nonAWPReactionSamples = append(nonAWPReactionSamples, reaction)
-					appendDemoSample(nonAWPReactionByDemo, demoID, rounds, reaction)
-				}
-			}
-		}
-		ttdRows.Close()
-		row.TTDHistogram = histogramMS(ttdSamples)
-		row.ReactionHistogram = histogramMS(reactionSamples)
-		row.TTDSamples = len(ttdSamples)
-		row.TTDMedianMS = percentile(ttdSamples, .5)
-		row.TTDWeightedMS = roundWeightedDemoMedian(ttdByDemo)
-		row.TTDP10MS = percentile(ttdSamples, .1)
-		row.TTDUnder190Rate = ratio(under190, len(ttdSamples))
-		row.AWPTTDSamples = len(awpTTDSamples)
-		row.AWPTTDMedianMS = percentile(awpTTDSamples, .5)
-		row.AWPTTDWeightedMS = roundWeightedDemoMedian(awpTTDByDemo)
-		if row.AWPTTDWeightedMS == 0 {
-			row.AWPTTDWeightedMS = row.AWPTTDMedianMS
-		}
-		row.NonAWPTTDSamples = len(nonAWPTTDSamples)
-		row.NonAWPTTDMedianMS = percentile(nonAWPTTDSamples, .5)
-		row.NonAWPTTDWeightedMS = roundWeightedDemoMedian(nonAWPTTDByDemo)
-		if row.NonAWPTTDWeightedMS == 0 {
-			row.NonAWPTTDWeightedMS = row.NonAWPTTDMedianMS
-		}
-		row.NonAWPReactionSamples = len(nonAWPReactionSamples)
-		row.NonAWPReactionWeightedMS = roundWeightedDemoMedian(nonAWPReactionByDemo)
-		if row.NonAWPReactionWeightedMS == 0 {
-			row.NonAWPReactionWeightedMS = percentile(nonAWPReactionSamples, .5)
-		}
-		for _, value := range ttdSamples {
-			row.TTDMeanMS += value
-		}
-		if row.TTDSamples > 0 {
-			row.TTDMeanMS /= float64(row.TTDSamples)
-		}
-		row.CrosshairMedianAngle = percentile(crosshairAngles, .5)
-		row.FirstShotMedianAngle = percentile(firstShotAngles, .5)
-
-		row.ReactionSamples = len(reactionSamples)
-		row.ReactionMedianMS = percentile(reactionSamples, .5)
-		row.ReactionWeightedMS = roundWeightedDemoMedian(reactionByDemo)
-		row.ReactionP10MS = percentile(reactionSamples, .1)
-		if row.TTDWeightedMS == 0 {
-			row.TTDWeightedMS = row.TTDMedianMS
-		}
-		if row.ReactionWeightedMS == 0 {
-			row.ReactionWeightedMS = row.ReactionMedianMS
-		}
+		samples.apply(row)
 	}
 
 	weaponRows, err := db.QueryContext(ctx, `SELECT w.steam_id,p.latest_name,w.weapon_name,SUM(w.shots),SUM(w.hit_shots),SUM(w.damage_events),SUM(w.head_hit_events),SUM(w.kills) FROM player_demo_weapon_stats w JOIN players p ON p.steam_id=w.steam_id JOIN demos d ON d.id=w.demo_id AND d.enabled=1 GROUP BY w.steam_id,p.latest_name,w.weapon_name ORDER BY w.steam_id,w.weapon_name`)
@@ -504,27 +547,29 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 		flagPlayer(row, config)
 	}
 
-	evidenceRows, err := db.QueryContext(ctx, `SELECT d.checksum,d.path,e.round_number,e.tick,e.steam_id,p.latest_name,e.victim_steam_id,e.kind,e.value,e.details FROM evidence e JOIN demos d ON d.id=e.demo_id LEFT JOIN players p ON p.steam_id=e.steam_id WHERE d.enabled=1 ORDER BY e.steam_id,d.demo_date,e.round_number,e.tick`)
-	if err != nil {
-		return nil, err
-	}
-	for evidenceRows.Next() {
-		var e PlayerEvidenceReportRow
-		if err := evidenceRows.Scan(&e.DemoChecksum, &e.DemoPath, &e.RoundNumber, &e.Tick, &e.SteamID64, &e.PlayerName, &e.VictimID, &e.Kind, &e.Value, &e.Details); err != nil {
-			evidenceRows.Close()
+	if options.IncludeEvidence {
+		evidenceRows, err := db.QueryContext(ctx, `SELECT d.checksum,d.path,e.round_number,e.tick,e.steam_id,p.latest_name,e.victim_steam_id,e.kind,e.value,e.details FROM evidence e JOIN demos d ON d.id=e.demo_id LEFT JOIN players p ON p.steam_id=e.steam_id WHERE d.enabled=1 ORDER BY e.steam_id,d.demo_date,e.round_number,e.tick`)
+		if err != nil {
 			return nil, err
 		}
-		report.Evidence = append(report.Evidence, e)
+		for evidenceRows.Next() {
+			var e PlayerEvidenceReportRow
+			if err := evidenceRows.Scan(&e.DemoChecksum, &e.DemoPath, &e.RoundNumber, &e.Tick, &e.SteamID64, &e.PlayerName, &e.VictimID, &e.Kind, &e.Value, &e.Details); err != nil {
+				evidenceRows.Close()
+				return nil, err
+			}
+			report.Evidence = append(report.Evidence, e)
+		}
+		evidenceRows.Close()
 	}
-	evidenceRows.Close()
 
-	demoRows, err := db.QueryContext(ctx, `SELECT d.checksum,d.path,d.file_name,d.map_name,d.demo_date,d.tick_rate,d.build_number,d.source,d.analysis_version,d.imported_at,d.enabled,d.quality_status,d.quality_reason,COUNT(s.steam_id),COALESCE(MAX(s.rounds),0) FROM demos d LEFT JOIN player_demo_stats s ON s.demo_id=d.id GROUP BY d.id ORDER BY d.demo_date,d.checksum`)
+	demoRows, err := db.QueryContext(ctx, `SELECT d.checksum,d.path,d.file_name,d.map_name,d.demo_date,d.tick_rate,d.build_number,d.source,d.analysis_version,d.imported_at,d.enabled,d.quality_status,d.quality_reason,d.origin,COUNT(s.steam_id),COALESCE(MAX(s.rounds),0) FROM demos d LEFT JOIN player_demo_stats s ON s.demo_id=d.id GROUP BY d.id ORDER BY d.demo_date,d.checksum`)
 	if err != nil {
 		return nil, err
 	}
 	for demoRows.Next() {
 		var d ImportedDemoReportRow
-		if err := demoRows.Scan(&d.Checksum, &d.Path, &d.FileName, &d.MapName, &d.Date, &d.TickRate, &d.BuildNumber, &d.Source, &d.AnalysisVersion, &d.ImportedAt, &d.Enabled, &d.QualityStatus, &d.QualityReason, &d.Players, &d.Rounds); err != nil {
+		if err := demoRows.Scan(&d.Checksum, &d.Path, &d.FileName, &d.MapName, &d.Date, &d.TickRate, &d.BuildNumber, &d.Source, &d.AnalysisVersion, &d.ImportedAt, &d.Enabled, &d.QualityStatus, &d.QualityReason, &d.Origin, &d.Players, &d.Rounds); err != nil {
 			demoRows.Close()
 			return nil, err
 		}
@@ -552,6 +597,7 @@ func ExportPlayerStatsReport(ctx context.Context, options PlayerStatsReportOptio
 	if err := os.MkdirAll(options.OutputPath, 0o755); err != nil {
 		return err
 	}
+	options.IncludeEvidence = true
 	report, err := buildPlayerStatsReport(ctx, options)
 	if err != nil {
 		return err
@@ -617,9 +663,9 @@ func writeEvidenceCSV(path string, rows []PlayerEvidenceReportRow) error {
 	return writeCSV(path, lines)
 }
 func writeDemosCSV(path string, rows []ImportedDemoReportRow) error {
-	lines := [][]string{{"checksum", "path", "file name", "map", "date", "tickrate", "build number", "source", "analysis version", "imported at", "enabled", "quality status", "quality reason", "players", "rounds"}}
+	lines := [][]string{{"checksum", "path", "file name", "map", "date", "tickrate", "build number", "source", "analysis version", "imported at", "enabled", "quality status", "quality reason", "origin", "players", "rounds"}}
 	for _, r := range rows {
-		lines = append(lines, []string{r.Checksum, r.Path, r.FileName, r.MapName, r.Date, f(r.TickRate), i(r.BuildNumber), r.Source, i(r.AnalysisVersion), r.ImportedAt, strconv.FormatBool(r.Enabled), r.QualityStatus, r.QualityReason, i(r.Players), i(r.Rounds)})
+		lines = append(lines, []string{r.Checksum, r.Path, r.FileName, r.MapName, r.Date, f(r.TickRate), i(r.BuildNumber), r.Source, i(r.AnalysisVersion), r.ImportedAt, strconv.FormatBool(r.Enabled), r.QualityStatus, r.QualityReason, r.Origin, i(r.Players), i(r.Rounds)})
 	}
 	return writeCSV(path, lines)
 }

@@ -3,6 +3,10 @@ services:
     build: .
     ports:
       - "8080:8080"
+    # Optional .env with CSDA_AUTH_USER / CSDA_AUTH_PASSWORD enables Basic Auth.
+    env_file:
+      - path: .env
+        required: false
     volumes:
       # Database and uploaded demos persist across restarts.
       - csda-data:/data

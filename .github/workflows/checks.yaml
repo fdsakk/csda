@@ -41,3 +41,29 @@ jobs:
 
       - name: Test
         run: go test ./tests
+
+  stats-web:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Test player stats and web server packages
+        run: go test ./pkg/api ./pkg/web
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install web dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      - name: Build web UI
+        working-directory: web
+        run: bun run build

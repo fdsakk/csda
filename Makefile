@@ -1,5 +1,6 @@
-# Strip debug info
-GO_FLAGS += "-ldflags=-s -w"
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# Strip debug info and stamp the version
+GO_FLAGS += "-ldflags=-s -w -X github.com/akiver/cs-demo-analyzer/pkg/cli.Version=$(VERSION)"
 # Avoid embedding the build path in the executable for more reproducible builds
 GO_FLAGS += -trimpath
 BINARY_NAME=csda
