@@ -18,7 +18,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const playerStatsAnalysisVersion = 5
+const playerStatsAnalysisVersion = 6
 
 type DemoImportError struct {
 	Path  string `json:"path"`
@@ -148,7 +148,9 @@ CREATE TABLE IF NOT EXISTS demos (
   id INTEGER PRIMARY KEY, checksum TEXT NOT NULL UNIQUE, path TEXT NOT NULL, file_name TEXT NOT NULL,
   map_name TEXT NOT NULL, demo_date TEXT NOT NULL, tick_rate REAL NOT NULL, build_number INTEGER NOT NULL,
   source TEXT NOT NULL, analysis_version INTEGER NOT NULL, imported_at TEXT NOT NULL,
-  enabled INTEGER NOT NULL DEFAULT 1
+  enabled INTEGER NOT NULL DEFAULT 1,
+  quality_status TEXT NOT NULL DEFAULT 'not_checked',
+  quality_reason TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS players (
   steam_id INTEGER PRIMARY KEY, latest_name TEXT NOT NULL, names TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -241,6 +243,8 @@ INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, CURRENT_
 		{"player_demo_stats", "deaths", `INTEGER NOT NULL DEFAULT 0`},
 		{"players", "saved", `INTEGER NOT NULL DEFAULT 0`},
 		{"players", "banned", `INTEGER NOT NULL DEFAULT 0`},
+		{"demos", "quality_status", `TEXT NOT NULL DEFAULT 'not_checked'`},
+		{"demos", "quality_reason", `TEXT NOT NULL DEFAULT ''`},
 	}
 	for _, column := range addedColumns {
 		exists, checkErr := sqliteColumnExists(db, column[0], column[1])
@@ -253,8 +257,11 @@ INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, CURRENT_
 			}
 		}
 	}
-	_, err = db.Exec(`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, CURRENT_TIMESTAMP), (3, CURRENT_TIMESTAMP), (4, CURRENT_TIMESTAMP), (5, CURRENT_TIMESTAMP)`)
-	return err
+	_, err = db.Exec(`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, CURRENT_TIMESTAMP), (3, CURRENT_TIMESTAMP), (4, CURRENT_TIMESTAMP), (5, CURRENT_TIMESTAMP), (6, CURRENT_TIMESTAMP)`)
+	if err != nil {
+		return err
+	}
+	return auditUncheckedDemoQuality(context.Background(), db)
 }
 
 func sqliteColumnExists(db *sql.DB, table, column string) (bool, error) {
@@ -453,6 +460,7 @@ func BuildPlayerStatsDatabase(ctx context.Context, options PlayerStatsBuildOptio
 }
 
 func storeAnalyzedDemo(ctx context.Context, db *sql.DB, match *Match, stats DemoStats) error {
+	quality := assessDemoQuality(stats.Encounters)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -465,8 +473,9 @@ func storeAnalyzedDemo(ctx context.Context, db *sql.DB, match *Match, stats Demo
 	if _, err = tx.ExecContext(ctx, `DELETE FROM demos WHERE checksum = ? OR (file_name = ? AND map_name = ?)`, match.Checksum, match.DemoFileName, match.MapName); err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO demos(checksum,path,file_name,map_name,demo_date,tick_rate,build_number,source,analysis_version,imported_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
-		match.Checksum, match.DemoFilePath, match.DemoFileName, match.MapName, match.Date.UTC().Format(time.RFC3339), match.TickRate, match.BuildNumber, match.Source.String(), playerStatsAnalysisVersion, time.Now().UTC().Format(time.RFC3339))
+	enabled := quality.Status != demoQualityStatusWarning
+	res, err := tx.ExecContext(ctx, `INSERT INTO demos(checksum,path,file_name,map_name,demo_date,tick_rate,build_number,source,analysis_version,imported_at,enabled,quality_status,quality_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		match.Checksum, match.DemoFilePath, match.DemoFileName, match.MapName, match.Date.UTC().Format(time.RFC3339), match.TickRate, match.BuildNumber, match.Source.String(), playerStatsAnalysisVersion, time.Now().UTC().Format(time.RFC3339), enabled, quality.Status, quality.Reason)
 	if err != nil {
 		return err
 	}

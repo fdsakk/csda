@@ -49,6 +49,8 @@ csda stats report --db=player-stats.db --output=./stats-report --format=csv
 
 TTD measures the first spotted tick to first damage. Reaction Time measures the first spotted tick to first shot. In both cases three consecutive spotted ticks are required to validate the exposure, but timing starts at the first tick; samples outside `0–1000 ms` are excluded. The primary multi-demo value is the round-weighted average of each demo's median, while pooled median and P10 remain available in JSON/CSV. These are demo-derived estimates, not geometry-backed line-of-sight measurements.
 
+Each analyzed demo also receives a conservative timing-quality check. If low TTD and reaction medians appear across at least four sufficiently sampled players, the demo is automatically disabled in aggregates. It remains visible in the Demos dialog and can be manually enabled. Existing databases are checked once during migration.
+
 Use `--config=thresholds.json` to override fields returned by `api.DefaultSuspicionConfig()`. A player receives a score after at least three demos and 100 firearm shots by default.
 
 ### Local React dashboard

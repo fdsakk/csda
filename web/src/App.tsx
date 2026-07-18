@@ -1,5 +1,5 @@
 import { DragEvent, Fragment, type ReactNode, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Ban, BookOpen, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FileUp, Film, ListFilter, Search, Trash2, Upload, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Ban, BookOpen, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FileUp, Film, ListFilter, Search, ShieldAlert, Trash2, Upload, X } from 'lucide-react';
 import { deleteDemo, Demo, getJobs, getReport, importStats, Job, Player, PlayerWeapon, Report, Rule, setDemoEnabled, setPlayerBanned, setPlayerSaved, uploadDemos } from './api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +22,10 @@ const STATUS_LABEL: Record<Player['status'], string> = {
   watch: 'Watch',
   cheater: 'Cheater',
   insufficient_sample: 'Low sample',
+};
+
+const QUALITY_REASON_LABEL: Record<string, string> = {
+  systemic_low_timing: 'Systemically low TTD and reaction across players',
 };
 
 function pct(value: number) { return `${(value * 100).toFixed(1)}%`; }
@@ -760,6 +764,7 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
   const [page, setPage] = useState(0);
   const [showAll, setShowAll] = useState(false);
   const enabledCount = demos.filter((demo) => demo.enabled).length;
+  const warningCount = demos.filter((demo) => demo.qualityStatus === 'warning').length;
 
   const sorted = useMemo(() => demos.toSorted((a, b) => (b.date || '').localeCompare(a.date || '')), [demos]);
   const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
@@ -829,7 +834,10 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <DialogTitle className="text-2xl">Demos</DialogTitle>
-              <p className="text-sm text-muted-foreground">{demos.length} demo{demos.length === 1 ? '' : 's'} · {enabledCount} included in stats</p>
+              <p className="text-sm text-muted-foreground">
+                {demos.length} demo{demos.length === 1 ? '' : 's'} · {enabledCount} included in stats
+                {warningCount ? ` · ${warningCount} quality warning${warningCount === 1 ? '' : 's'}` : ''}
+              </p>
             </div>
             <div className="flex gap-2">
               {demos.length ? (
@@ -860,7 +868,7 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
                 <Table className="min-w-[760px]">
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                      {['In stats', 'File', 'Map', 'Played', 'Source', 'Players', 'Rounds', 'Added', ''].map((label, index) => (
+                      {['In stats', 'Quality', 'File', 'Map', 'Played', 'Source', 'Players', 'Rounds', 'Added', ''].map((label, index) => (
                         <TableHead key={label || index} className="bg-muted/40">{label}</TableHead>
                       ))}
                     </TableRow>
@@ -884,7 +892,7 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
                                 onChange={() => void toggleDay(key, !allEnabled)}
                               />
                             </TableCell>
-                            <TableCell colSpan={8} className="text-xs font-medium text-muted-foreground">
+                            <TableCell colSpan={9} className="text-xs font-medium text-muted-foreground">
                               {key === 'unknown' ? 'Unknown date' : new Date(key).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                               {' · '}{enabledInDay}/{dayDemos.length} in stats
                             </TableCell>
@@ -897,8 +905,24 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
                                   className="size-4 accent-primary"
                                   checked={demo.enabled}
                                   disabled={pending === demo.checksum}
+                                  title={demo.qualityStatus === 'warning' && !demo.enabled ? 'Automatically excluded after a demo quality warning. Check to include manually.' : undefined}
                                   onChange={() => void toggle(demo)}
                                 />
+                              </TableCell>
+                              <TableCell>
+                                {demo.qualityStatus === 'warning' ? (
+                                  <Badge
+                                    variant="warning"
+                                    className="gap-1 whitespace-nowrap"
+                                    title={QUALITY_REASON_LABEL[demo.qualityReason] ?? demo.qualityReason}
+                                  >
+                                    <ShieldAlert className="size-3" /> Warning
+                                  </Badge>
+                                ) : demo.qualityStatus === 'not_checked' ? (
+                                  <Badge title="Imported with an older analysis version; re-analyze to run the quality check.">Not checked</Badge>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">OK</span>
+                                )}
                               </TableCell>
                               <TableCell className="font-medium">{demo.fileName}</TableCell>
                               <TableCell>{demo.mapName}</TableCell>
@@ -1021,7 +1045,7 @@ function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 
           <GuideSection title="Saved players and demos">
             <GuideItem term="Bookmark">Use the bookmark in the Status column to pin a player to the top while reviewing them later.</GuideItem>
-            <GuideItem term="Demos">The Demos button lets you enable or disable a demo from aggregates and export/import the saved statistics set.</GuideItem>
+            <GuideItem term="Demos">The Demos button lets you enable or disable a demo from aggregates and export/import the saved statistics set. A quality warning automatically excludes a demo when low or inconsistent timing affects several players; you can still include it manually after review.</GuideItem>
           </GuideSection>
 
           <GuideSection title="Decision rule">

@@ -29,6 +29,47 @@ func TestRoundWeightedDemoMedian(t *testing.T) {
 	}
 }
 
+func demoTimingEncounters(players, samples int, ttd, reaction float64) []DemoEncounter {
+	encounters := make([]DemoEncounter, 0, players*samples)
+	for player := 1; player <= players; player++ {
+		for sample := 0; sample < samples; sample++ {
+			// Small deterministic variation prevents the fixture from depending on
+			// an entirely identical, artificial distribution.
+			variation := float64((sample%3)-1) * 5
+			encounters = append(encounters, DemoEncounter{
+				AttackerSteamID64: uint64(player),
+				TTDMS:             ttd + variation,
+				ReactionTimeMS:    reaction + variation,
+				WeaponName:        "AK-47",
+			})
+		}
+	}
+	return encounters
+}
+
+func TestDemoQualityFlagsSystemicLowTiming(t *testing.T) {
+	quality := assessDemoQuality(demoTimingEncounters(5, 10, 240, 140))
+	if quality.Status != demoQualityStatusWarning {
+		t.Fatalf("quality=%+v, want warning", quality)
+	}
+	if quality.Reason != "systemic_low_timing" {
+		t.Fatalf("unexpected quality reason: %+v", quality)
+	}
+}
+
+func TestDemoQualityDoesNotFlagOneFastPlayer(t *testing.T) {
+	encounters := demoTimingEncounters(1, 10, 220, 130)
+	for player := 2; player <= 5; player++ {
+		for sample := 0; sample < 10; sample++ {
+			encounters = append(encounters, DemoEncounter{AttackerSteamID64: uint64(player), TTDMS: 480 + float64(sample%3)*20, ReactionTimeMS: 270 + float64(sample%3)*15, WeaponName: "AK-47"})
+		}
+	}
+	quality := assessDemoQuality(encounters)
+	if quality.Status != demoQualityStatusOK {
+		t.Fatalf("one fast player disabled the whole demo: %+v", quality)
+	}
+}
+
 func TestFlagPlayerRequiresMinimumSample(t *testing.T) {
 	config := DefaultSuspicionConfig()
 	row := PlayerStatsReportRow{DemoCount: 2, Shots: 99, NonAWPTTDSamples: 20, NonAWPTTDWeightedMS: 300}
@@ -53,16 +94,35 @@ func TestFlagPlayerTiers(t *testing.T) {
 		{"non-awp ttd suspicious with elite head accuracy", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350; r.DamageEvents, r.HeadHitRate = 30, .42 }, "cheater"},
 		{"non-awp ttd above suspicious band is normal", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 360 }, "normal"},
 		{"healthy non-awp ttd", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500 }, "normal"},
-		{"non-awp reaction below human floor", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.NonAWPReactionSamples, r.NonAWPReactionWeightedMS = 20, 180 }, "cheater"},
+		{"non-awp reaction below human floor", func(r *PlayerStatsReportRow) {
+			r.NonAWPTTDWeightedMS = 500
+			r.NonAWPReactionSamples, r.NonAWPReactionWeightedMS = 20, 180
+		}, "cheater"},
 		{"head hit rate watch", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.DamageEvents, r.HeadHitRate = 40, .52 }, "watch"},
 		{"head hit rate cheater", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.DamageEvents, r.HeadHitRate = 40, .62 }, "cheater"},
 		{"insufficient non-awp ttd sample stays normal", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 300; r.NonAWPTTDSamples = 5 }, "normal"},
 		// AWP tier is independent of the rifle: clean rifle, fast AWP → flagged.
-		{"awp ttd below cheater line", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 200 }, "cheater"},
-		{"awp ttd watch band", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 260 }, "watch"},
-		{"awp ttd normal", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 300 }, "normal"},
-		{"awp flags without being an awper", func(r *PlayerStatsReportRow) { r.IsAWPer = false; r.NonAWPTTDWeightedMS = 500; r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 200 }, "cheater"},
-		{"insufficient awp sample stays normal", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.AWPTTDSamples, r.AWPTTDWeightedMS = 5, 200 }, "normal"},
+		{"awp ttd below cheater line", func(r *PlayerStatsReportRow) {
+			r.NonAWPTTDWeightedMS = 500
+			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 200
+		}, "cheater"},
+		{"awp ttd watch band", func(r *PlayerStatsReportRow) {
+			r.NonAWPTTDWeightedMS = 500
+			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 260
+		}, "watch"},
+		{"awp ttd normal", func(r *PlayerStatsReportRow) {
+			r.NonAWPTTDWeightedMS = 500
+			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 300
+		}, "normal"},
+		{"awp flags without being an awper", func(r *PlayerStatsReportRow) {
+			r.IsAWPer = false
+			r.NonAWPTTDWeightedMS = 500
+			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 200
+		}, "cheater"},
+		{"insufficient awp sample stays normal", func(r *PlayerStatsReportRow) {
+			r.NonAWPTTDWeightedMS = 500
+			r.AWPTTDSamples, r.AWPTTDWeightedMS = 5, 200
+		}, "normal"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -158,6 +218,7 @@ func TestStoreReplacesExistingDemoChecksum(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer db.Close()
 	match := &Match{Checksum: "same", DemoFilePath: "a.dem", DemoFileName: "a", Date: time.Now(), Source: constants.DemoSourceValve}
 	stats := DemoStats{Players: map[uint64]*DemoPlayerStats{1: {SteamID64: 1, Name: "one", Shots: 10}}, Weapons: map[uint64]map[string]*DemoWeaponStats{}}
 	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
@@ -239,6 +300,51 @@ func TestDemosEnabledColumnDefaultsToOne(t *testing.T) {
 	}
 	if enabled != 1 {
 		t.Fatalf("enabled=%d, want 1", enabled)
+	}
+}
+
+func TestQualityWarningAutoDisablesDemoAndAllowsManualOverride(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "stats.db")
+	db, err := openPlayerStatsDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	players := make(map[uint64]*DemoPlayerStats)
+	for id := uint64(1); id <= 5; id++ {
+		players[id] = &DemoPlayerStats{SteamID64: id, Name: "player", Rounds: 10, Shots: 30}
+	}
+	match := &Match{Checksum: "quality1", DemoFilePath: "quality.dem", DemoFileName: "quality", MapName: "de_test", Date: time.Now(), TickRate: 64, Source: constants.DemoSourceValve}
+	stats := DemoStats{Players: players, Weapons: map[uint64]map[string]*DemoWeaponStats{}, Encounters: demoTimingEncounters(5, 10, 240, 140)}
+	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+		t.Fatal(err)
+	}
+	var enabled bool
+	var status string
+	if err := db.QueryRow(`SELECT enabled,quality_status FROM demos WHERE checksum='quality1'`).Scan(&enabled, &status); err != nil {
+		t.Fatal(err)
+	}
+	if enabled || status != demoQualityStatusWarning {
+		t.Fatalf("enabled=%v status=%q, want false/warning", enabled, status)
+	}
+	db.Close()
+
+	report, err := buildPlayerStatsReport(ctx, PlayerStatsReportOptions{DatabasePath: dbPath, Config: DefaultSuspicionConfig()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Players) != 0 || len(report.Demos) != 1 || report.Demos[0].QualityStatus != demoQualityStatusWarning {
+		t.Fatalf("warning demo leaked into stats or metadata is missing: %+v", report)
+	}
+	if err := SetDemoEnabled(ctx, dbPath, "quality1", true); err != nil {
+		t.Fatal(err)
+	}
+	report, err = buildPlayerStatsReport(ctx, PlayerStatsReportOptions{DatabasePath: dbPath, Config: DefaultSuspicionConfig()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Players) != 5 || !report.Demos[0].Enabled || report.Demos[0].QualityStatus != demoQualityStatusWarning {
+		t.Fatalf("manual override did not persist: %+v", report)
 	}
 }
 

@@ -156,6 +156,8 @@ type ImportedDemoReportRow struct {
 	AnalysisVersion int     `json:"analysisVersion"`
 	ImportedAt      string  `json:"importedAt"`
 	Enabled         bool    `json:"enabled"`
+	QualityStatus   string  `json:"qualityStatus"`
+	QualityReason   string  `json:"qualityReason"`
 	Players         int     `json:"players"`
 	Rounds          int     `json:"rounds"`
 }
@@ -516,13 +518,13 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 	}
 	evidenceRows.Close()
 
-	demoRows, err := db.QueryContext(ctx, `SELECT d.checksum,d.path,d.file_name,d.map_name,d.demo_date,d.tick_rate,d.build_number,d.source,d.analysis_version,d.imported_at,d.enabled,COUNT(s.steam_id),COALESCE(MAX(s.rounds),0) FROM demos d LEFT JOIN player_demo_stats s ON s.demo_id=d.id GROUP BY d.id ORDER BY d.demo_date,d.checksum`)
+	demoRows, err := db.QueryContext(ctx, `SELECT d.checksum,d.path,d.file_name,d.map_name,d.demo_date,d.tick_rate,d.build_number,d.source,d.analysis_version,d.imported_at,d.enabled,d.quality_status,d.quality_reason,COUNT(s.steam_id),COALESCE(MAX(s.rounds),0) FROM demos d LEFT JOIN player_demo_stats s ON s.demo_id=d.id GROUP BY d.id ORDER BY d.demo_date,d.checksum`)
 	if err != nil {
 		return nil, err
 	}
 	for demoRows.Next() {
 		var d ImportedDemoReportRow
-		if err := demoRows.Scan(&d.Checksum, &d.Path, &d.FileName, &d.MapName, &d.Date, &d.TickRate, &d.BuildNumber, &d.Source, &d.AnalysisVersion, &d.ImportedAt, &d.Enabled, &d.Players, &d.Rounds); err != nil {
+		if err := demoRows.Scan(&d.Checksum, &d.Path, &d.FileName, &d.MapName, &d.Date, &d.TickRate, &d.BuildNumber, &d.Source, &d.AnalysisVersion, &d.ImportedAt, &d.Enabled, &d.QualityStatus, &d.QualityReason, &d.Players, &d.Rounds); err != nil {
 			demoRows.Close()
 			return nil, err
 		}
@@ -615,9 +617,9 @@ func writeEvidenceCSV(path string, rows []PlayerEvidenceReportRow) error {
 	return writeCSV(path, lines)
 }
 func writeDemosCSV(path string, rows []ImportedDemoReportRow) error {
-	lines := [][]string{{"checksum", "path", "file name", "map", "date", "tickrate", "build number", "source", "analysis version", "imported at", "enabled", "players", "rounds"}}
+	lines := [][]string{{"checksum", "path", "file name", "map", "date", "tickrate", "build number", "source", "analysis version", "imported at", "enabled", "quality status", "quality reason", "players", "rounds"}}
 	for _, r := range rows {
-		lines = append(lines, []string{r.Checksum, r.Path, r.FileName, r.MapName, r.Date, f(r.TickRate), i(r.BuildNumber), r.Source, i(r.AnalysisVersion), r.ImportedAt, strconv.FormatBool(r.Enabled), i(r.Players), i(r.Rounds)})
+		lines = append(lines, []string{r.Checksum, r.Path, r.FileName, r.MapName, r.Date, f(r.TickRate), i(r.BuildNumber), r.Source, i(r.AnalysisVersion), r.ImportedAt, strconv.FormatBool(r.Enabled), r.QualityStatus, r.QualityReason, i(r.Players), i(r.Rounds)})
 	}
 	return writeCSV(path, lines)
 }

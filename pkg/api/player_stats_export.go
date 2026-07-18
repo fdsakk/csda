@@ -322,6 +322,27 @@ func parseSteamID(value string) (uint64, error) {
 	return id, nil
 }
 
+func assessExportedDemoQuality(demo ExportedDemo, version int) (demoQualityAssessment, error) {
+	encounters := make([]DemoEncounter, 0, len(demo.Encounters))
+	for _, exported := range demo.Encounters {
+		attacker, err := parseSteamID(exported.AttackerSteamID)
+		if err != nil {
+			return demoQualityAssessment{}, err
+		}
+		reaction := exported.ReactionTimeMS
+		if version == 1 {
+			reaction = -1
+		}
+		encounters = append(encounters, DemoEncounter{
+			AttackerSteamID64: attacker,
+			TTDMS:             exported.TTDMS,
+			ReactionTimeMS:    reaction,
+			WeaponName:        exported.WeaponName,
+		})
+	}
+	return assessDemoQuality(encounters), nil
+}
+
 // ImportPlayerStatsData merges an export payload into the database. Demos whose
 // checksum already exists are skipped; everything runs in a single transaction.
 func ImportPlayerStatsData(ctx context.Context, databasePath string, payload *PlayerStatsExport) (*PlayerStatsImportResult, error) {
@@ -405,8 +426,13 @@ func ImportPlayerStatsData(ctx context.Context, databasePath string, payload *Pl
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
-		res, err := tx.ExecContext(ctx, `INSERT INTO demos(checksum,path,file_name,map_name,demo_date,tick_rate,build_number,source,analysis_version,imported_at,enabled) VALUES(?,?,?,?,?,?,?,?,?,?,1)`,
-			demo.Checksum, demo.Path, demo.FileName, demo.MapName, demo.DemoDate, demo.TickRate, demo.BuildNumber, demo.Source, demo.AnalysisVersion, now)
+		quality, err := assessExportedDemoQuality(demo, payload.Version)
+		if err != nil {
+			return nil, err
+		}
+		enabled := quality.Status != demoQualityStatusWarning
+		res, err := tx.ExecContext(ctx, `INSERT INTO demos(checksum,path,file_name,map_name,demo_date,tick_rate,build_number,source,analysis_version,imported_at,enabled,quality_status,quality_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			demo.Checksum, demo.Path, demo.FileName, demo.MapName, demo.DemoDate, demo.TickRate, demo.BuildNumber, demo.Source, demo.AnalysisVersion, now, enabled, quality.Status, quality.Reason)
 		if err != nil {
 			return nil, err
 		}

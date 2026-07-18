@@ -72,6 +72,8 @@ export type Demo = {
   analysisVersion: number;
   importedAt: string;
   enabled: boolean;
+  qualityStatus: 'ok' | 'warning' | 'not_checked';
+  qualityReason: 'systemic_low_timing' | string;
   players: number;
   rounds: number;
 };
