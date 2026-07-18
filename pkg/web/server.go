@@ -110,15 +110,16 @@ type Job struct {
 }
 
 type Server struct {
-	options Options
-	mux     *http.ServeMux
-	mu      sync.RWMutex
-	jobs    map[string]*Job
-	queue   chan string
-	ctx     context.Context
-	cancel  context.CancelFunc
-	done    chan struct{}
-	close   sync.Once
+	options   Options
+	mux       *http.ServeMux
+	mu        sync.RWMutex
+	uploadsMu sync.Mutex
+	jobs      map[string]*Job
+	queue     chan string
+	ctx       context.Context
+	cancel    context.CancelFunc
+	done      chan struct{}
+	close     sync.Once
 }
 
 func NewServer(options Options) (*Server, error) {
@@ -154,6 +155,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/report", s.handleReport)
 	s.mux.HandleFunc("GET /api/jobs", s.handleJobs)
 	s.mux.HandleFunc("POST /api/uploads", s.handleUpload)
+	s.mux.HandleFunc("DELETE /api/uploads", s.handleUploadsClear)
+	s.mux.HandleFunc("PATCH /api/demos", s.handleAllDemosToggle)
 	s.mux.HandleFunc("PATCH /api/demos/{checksum}", s.handleDemoToggle)
 	s.mux.HandleFunc("DELETE /api/demos/{checksum}", s.handleDemoDelete)
 	s.mux.HandleFunc("PATCH /api/players/{steamId}", s.handlePlayerSaved)
@@ -207,6 +210,8 @@ func randomID() (string, error) {
 }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	s.uploadsMu.Lock()
+	defer s.uploadsMu.Unlock()
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	reader, err := r.MultipartReader()
 	if err != nil {
@@ -282,7 +287,64 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleUploadsClear(w http.ResponseWriter, _ *http.Request) {
+	s.uploadsMu.Lock()
+	defer s.uploadsMu.Unlock()
+
+	s.mu.RLock()
+	for _, job := range s.jobs {
+		if job.Status == JobQueued || job.Status == JobRunning {
+			s.mu.RUnlock()
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "wait for demo analysis to finish before clearing uploads"})
+			return
+		}
+	}
+	s.mu.RUnlock()
+
+	root, err := filepath.Abs(s.options.UploadsPath)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	volumeRoot := filepath.Clean(filepath.VolumeName(root) + string(filepath.Separator))
+	workingDirectory, _ := os.Getwd()
+	if filepath.Clean(root) == volumeRoot || (workingDirectory != "" && filepath.Clean(root) == filepath.Clean(workingDirectory)) {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "refusing to clear an unsafe uploads path"})
+		return
+	}
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		err = os.MkdirAll(root, 0o755)
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	for _, entry := range entries {
+		if err := os.RemoveAll(filepath.Join(root, entry.Name())); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 const maxImportBytes int64 = 1 << 30
+
+func (s *Server) handleAllDemosToggle(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Enabled == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `expected JSON body with "enabled" boolean`})
+		return
+	}
+	if err := api.SetAllDemosEnabled(r.Context(), s.options.DatabasePath, *body.Enabled); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
 
 func (s *Server) handleDemoToggle(w http.ResponseWriter, r *http.Request) {
 	var body struct {

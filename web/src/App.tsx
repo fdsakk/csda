@@ -1,6 +1,6 @@
 import { DragEvent, Fragment, type ReactNode, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Ban, BookOpen, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FileUp, Film, ListFilter, Search, ShieldAlert, Trash2, Upload, X } from 'lucide-react';
-import { deleteDemo, Demo, getJobs, getReport, importStats, Job, Player, PlayerWeapon, Report, Rule, setDemoEnabled, setPlayerBanned, setPlayerSaved, uploadDemos } from './api';
+import { clearUploads, deleteDemo, Demo, getJobs, getReport, importStats, Job, Player, PlayerWeapon, Report, Rule, setAllDemosEnabled, setDemoEnabled, setPlayerBanned, setPlayerSaved, uploadDemos } from './api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -760,28 +760,21 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
   const [pending, setPending] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [failed, setFailed] = useState(false);
-  const [pageSize, setPageSize] = useState(12);
-  const [page, setPage] = useState(0);
-  const [showAll, setShowAll] = useState(false);
   const enabledCount = demos.filter((demo) => demo.enabled).length;
   const warningCount = demos.filter((demo) => demo.qualityStatus === 'warning').length;
 
   const sorted = useMemo(() => demos.toSorted((a, b) => (b.date || '').localeCompare(a.date || '')), [demos]);
-  const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
-  const currentPage = Math.min(page, pageCount - 1);
-  const visible = showAll ? sorted : sorted.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
-
   const dayKey = (demo: Demo) => (demo.date ? demo.date.slice(0, 10) : 'unknown');
   const dayGroups = useMemo(() => {
     const groups = new Map<string, Demo[]>();
-    for (const demo of visible) {
+    for (const demo of sorted) {
       const key = dayKey(demo);
       const group = groups.get(key);
       if (group) group.push(demo);
       else groups.set(key, [demo]);
     }
     return [...groups.entries()];
-  }, [visible]);
+  }, [sorted]);
 
   const report = (text: string, isError: boolean) => { setMessage(text); setFailed(isError); };
 
@@ -800,7 +793,6 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
     finally { setPending(null); }
   };
 
-  // Toggles every demo of the day (also the ones on other pages).
   const toggleDay = async (key: string, target: boolean) => {
     setPending(key);
     try {
@@ -809,6 +801,26 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
       setMessage('');
       onChanged();
     } catch (cause) { report(cause instanceof Error ? cause.message : 'Toggle failed', true); }
+    finally { setPending(null); }
+  };
+
+  const toggleAll = async (enabled: boolean) => {
+    setPending('all');
+    try {
+      await setAllDemosEnabled(enabled);
+      setMessage('');
+      onChanged();
+    } catch (cause) { report(cause instanceof Error ? cause.message : 'Toggle failed', true); }
+    finally { setPending(null); }
+  };
+
+  const clearUploadStorage = async () => {
+    if (!window.confirm('Delete all uploaded demo files? Analyzed statistics will remain in the database.')) return;
+    setPending('uploads');
+    try {
+      await clearUploads();
+      report('Upload storage cleared. Analyzed statistics were kept.', false);
+    } catch (cause) { report(cause instanceof Error ? cause.message : 'Unable to clear uploads', true); }
     finally { setPending(null); }
   };
 
@@ -829,9 +841,9 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
           </Button>
         }
       />
-      <DialogContent className="max-w-7xl px-16 py-12">
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+      <DialogContent className="h-[calc(100dvh-3rem)] max-h-[calc(100dvh-3rem)] max-w-7xl overflow-hidden p-0">
+        <div className="flex h-full min-h-0 flex-col">
+          <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border px-6 py-4 pr-14">
             <div>
               <DialogTitle className="text-2xl">Demos</DialogTitle>
               <p className="text-sm text-muted-foreground">
@@ -839,37 +851,35 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
                 {warningCount ? ` · ${warningCount} quality warning${warningCount === 1 ? '' : 's'}` : ''}
               </p>
             </div>
-            <div className="flex gap-2">
-              {demos.length ? (
-                <Select value={String(pageSize)} onValueChange={(value) => { setPageSize(Number(value)); setShowAll(false); setPage(0); }}>
-                  <SelectTrigger className="h-9 w-32"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {PAGE_SIZES.map((size) => (
-                      <SelectItem key={size} value={String(size)}>{size} / page</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : null}
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" disabled={!demos.length || enabledCount === demos.length || pending !== null} onClick={() => void toggleAll(true)}>
+                Select all
+              </Button>
+              <Button variant="outline" size="sm" disabled={!demos.length || enabledCount === 0 || pending !== null} onClick={() => void toggleAll(false)}>
+                Deselect all
+              </Button>
               <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.target.value = ''; }} />
-              <Button variant="outline" size="sm" className="h-9" onClick={() => fileInput.current?.click()}>
+              <Button variant="outline" size="sm" onClick={() => fileInput.current?.click()}>
                 <FileUp className="size-4" /> Import
               </Button>
-              <Button variant="outline" size="sm" className="h-9" onClick={() => { window.location.href = '/api/export'; }}>
+              <Button variant="outline" size="sm" onClick={() => { window.location.href = '/api/export'; }}>
                 <FileDown className="size-4" /> Export
               </Button>
+              <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" disabled={pending !== null} onClick={() => void clearUploadStorage()}>
+                <Trash2 className="size-4" /> Clear uploads
+              </Button>
             </div>
-          </div>
+          </header>
 
-          {message ? <p className={cn('text-sm', failed ? 'text-destructive' : 'text-muted-foreground')}>{message}</p> : null}
+          {message ? <p className={cn('border-b border-border px-6 py-2 text-sm', failed ? 'text-destructive' : 'text-muted-foreground')}>{message}</p> : null}
 
           {demos.length ? (
-            <>
-              <div className="max-h-[60vh] overflow-auto rounded-lg border border-border">
-                <Table className="min-w-[760px]">
+            <div className="cheat-sheet-scroll mx-6 mb-6 mt-4 min-h-0 flex-1 overflow-auto rounded-lg border border-border">
+              <Table className="min-w-[920px]">
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
                       {['In stats', 'Quality', 'File', 'Map', 'Played', 'Source', 'Players', 'Rounds', 'Added', ''].map((label, index) => (
-                        <TableHead key={label || index} className="bg-muted/40">{label}</TableHead>
+                        <TableHead key={label || index} className="sticky top-0 z-20 bg-background">{label}</TableHead>
                       ))}
                     </TableRow>
                   </TableHeader>
@@ -887,7 +897,7 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
                                 className="size-4 accent-primary"
                                 checked={allEnabled}
                                 ref={(el) => { if (el) el.indeterminate = enabledInDay > 0 && !allEnabled; }}
-                                disabled={pending === key}
+                                disabled={pending !== null}
                                 title={allEnabled ? 'Exclude the whole day' : 'Include the whole day'}
                                 onChange={() => void toggleDay(key, !allEnabled)}
                               />
@@ -904,7 +914,7 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
                                   type="checkbox"
                                   className="size-4 accent-primary"
                                   checked={demo.enabled}
-                                  disabled={pending === demo.checksum}
+                                  disabled={pending !== null}
                                   title={demo.qualityStatus === 'warning' && !demo.enabled ? 'Automatically excluded after a demo quality warning. Check to include manually.' : undefined}
                                   onChange={() => void toggle(demo)}
                                 />
@@ -935,7 +945,7 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
                                 <button
                                   className="text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
                                   title="Delete demo and all of its stats"
-                                  disabled={pending === demo.checksum}
+                                  disabled={pending !== null}
                                   onClick={() => void remove(demo)}
                                 >
                                   <Trash2 className="size-4" />
@@ -947,33 +957,10 @@ function DemosSection({ demos, onChanged }: { demos: Demo[]; onChanged: () => vo
                       );
                     })}
                   </TableBody>
-                </Table>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-muted-foreground">{demos.length} demos</p>
-                <div className="flex items-center gap-2">
-                  {!showAll && pageCount > 1 ? (
-                    <>
-                      <Button variant="outline" size="sm" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
-                        <ChevronLeft className="size-4" />
-                      </Button>
-                      <span className="text-sm tabular-nums text-muted-foreground">{currentPage + 1} / {pageCount}</span>
-                      <Button variant="outline" size="sm" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}>
-                        <ChevronRight className="size-4" />
-                      </Button>
-                    </>
-                  ) : null}
-                  {demos.length > pageSize ? (
-                    <Button variant="ghost" size="sm" onClick={() => { setShowAll((value) => !value); setPage(0); }}>
-                      {showAll ? 'Show pages' : 'Show all'}
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-            </>
+              </Table>
+            </div>
           ) : (
-            <div className="rounded-lg border border-border py-10 text-center text-sm text-muted-foreground">No demos analyzed yet.</div>
+            <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">No demos analyzed yet.</div>
           )}
         </div>
       </DialogContent>
@@ -1045,7 +1032,7 @@ function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 
           <GuideSection title="Saved players and demos">
             <GuideItem term="Bookmark">Use the bookmark in the Status column to pin a player to the top while reviewing them later.</GuideItem>
-            <GuideItem term="Demos">The Demos button lets you enable or disable a demo from aggregates and export/import the saved statistics set. A quality warning automatically excludes a demo when low or inconsistent timing affects several players; you can still include it manually after review.</GuideItem>
+            <GuideItem term="Demos">The Demos page lets you enable or disable demos from aggregates, manage imports and exports, and clear uploaded files after analysis. A quality warning automatically excludes a demo when low timing affects several players; you can still include it manually after review.</GuideItem>
           </GuideSection>
 
           <GuideSection title="Decision rule">

@@ -112,6 +112,7 @@
 
 .cheat-sheet-scroll::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 
 .cheat-sheet-scroll::-webkit-scrollbar-track {

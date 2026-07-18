@@ -33,6 +33,17 @@ func SetDemoEnabled(ctx context.Context, databasePath, checksum string, enabled 
 	return nil
 }
 
+// SetAllDemosEnabled includes or excludes every imported demo from reports.
+func SetAllDemosEnabled(ctx context.Context, databasePath string, enabled bool) error {
+	db, err := openPlayerStatsDB(databasePath)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.ExecContext(ctx, `UPDATE demos SET enabled=?`, enabled)
+	return err
+}
+
 // DeleteDemo permanently removes a demo and all of its stats (player demo
 // stats, encounters, reactions, weapon stats and evidence cascade with it).
 // It returns the stored demo path so callers can also remove the file.

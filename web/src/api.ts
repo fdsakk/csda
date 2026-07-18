@@ -139,6 +139,26 @@ export async function setDemoEnabled(checksum: string, enabled: boolean): Promis
   }
 }
 
+export async function setAllDemosEnabled(enabled: boolean): Promise<void> {
+  const response = await fetch('/api/demos', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ error: undefined }));
+    throw new Error(body.error ?? `Request failed: ${response.status}`);
+  }
+}
+
+export async function clearUploads(): Promise<void> {
+  const response = await fetch('/api/uploads', { method: 'DELETE' });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ error: undefined }));
+    throw new Error(body.error ?? `Request failed: ${response.status}`);
+  }
+}
+
 export async function deleteDemo(checksum: string): Promise<void> {
   const response = await fetch(`/api/demos/${encodeURIComponent(checksum)}`, { method: 'DELETE' });
   if (!response.ok) {

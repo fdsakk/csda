@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -182,6 +183,67 @@ func TestToggleValidation(t *testing.T) {
 	}
 	if response := do(server, http.MethodPatch, "/api/demos/missing", []byte(`not json`)); response.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d", response.Code)
+	}
+}
+
+func TestToggleAllDemos(t *testing.T) {
+	server := newTestServer(t)
+	if response := do(server, http.MethodPost, "/api/import", []byte(validExport)); response.Code != http.StatusOK {
+		t.Fatalf("import status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := do(server, http.MethodPatch, "/api/demos", []byte(`{"enabled":false}`)); response.Code != http.StatusNoContent {
+		t.Fatalf("toggle all status=%d body=%s", response.Code, response.Body.String())
+	}
+	response := do(server, http.MethodGet, "/api/report", nil)
+	var report struct {
+		Demos []struct {
+			Enabled bool `json:"enabled"`
+		} `json:"importedDemos"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Demos) != 1 || report.Demos[0].Enabled {
+		t.Fatalf("demo should be disabled: %+v", report.Demos)
+	}
+}
+
+func TestClearUploads(t *testing.T) {
+	root := t.TempDir()
+	uploadsPath := filepath.Join(root, "uploads")
+	server, err := NewServer(Options{DatabasePath: filepath.Join(root, "stats.db"), UploadsPath: uploadsPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(server.Close)
+	jobPath := filepath.Join(uploadsPath, "finished-job")
+	if err := os.MkdirAll(jobPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(jobPath, "match.dem"), []byte("demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	response := do(server, http.MethodDelete, "/api/uploads", nil)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("clear status=%d body=%s", response.Code, response.Body.String())
+	}
+	entries, err := os.ReadDir(uploadsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("uploads still contains %d entries", len(entries))
+	}
+}
+
+func TestClearUploadsRejectsActiveJob(t *testing.T) {
+	server := newTestServer(t)
+	server.mu.Lock()
+	server.jobs["active"] = &Job{ID: "active", Status: JobRunning}
+	server.mu.Unlock()
+	if response := do(server, http.MethodDelete, "/api/uploads", nil); response.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
