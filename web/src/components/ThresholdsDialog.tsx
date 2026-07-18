@@ -104,7 +104,7 @@ function ThresholdField({ field, config, onChange }: { field: Field; config: Sus
   const shown = field.percent ? config[field.key] * 100 : config[field.key];
   return (
     <label className="w-28 max-w-full flex-none" title={field.description}>
-      <span className="mb-1 flex min-h-10 items-end text-sm font-medium leading-5 text-foreground">{field.label}</span>
+      <span className="mb-1 flex min-h-10 items-end whitespace-nowrap text-[10px] font-medium leading-4 text-foreground">{field.label}</span>
       <span className="relative block w-full">
         <Input
           type="number"
@@ -112,7 +112,10 @@ function ThresholdField({ field, config, onChange }: { field: Field; config: Sus
           max={field.max ?? (field.percent ? 100 : undefined)}
           step={field.step ?? 1}
           value={shown}
-          className={cn('text-right tabular-nums', field.suffix && 'pr-10')}
+          className={cn(
+            'text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
+            field.suffix && 'pr-10',
+          )}
           onChange={(event) => {
             const parsed = Number(event.target.value);
             onChange(field.key, field.percent ? parsed / 100 : parsed);
