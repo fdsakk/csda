@@ -82,6 +82,9 @@ func (uploads *uploadCollector) addDemo(name string, reader io.Reader) error {
 type Options struct {
 	DatabasePath string
 	UploadsPath  string
+	// TrisDir contains awpy .tri map geometry used for visibility checks.
+	// The default is "tris", relative to the process working directory.
+	TrisDir string
 	// Assets contains the dashboard files rooted at index.html. It takes
 	// precedence over AssetsPath and is normally backed by go:embed.
 	Assets fs.FS
@@ -653,6 +656,7 @@ func (s *Server) worker() {
 				Source:                      job.source,
 				Jobs:                        4,
 				VisibilityConfirmationTicks: 3,
+				TrisDir:                     s.options.TrisDir,
 				OnDemoProcessed: func(processed, total int) {
 					s.mu.Lock()
 					job.Processed = processed

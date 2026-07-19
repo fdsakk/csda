@@ -40,10 +40,16 @@ func runApp(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	executable, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 
 	webServer, err := apiweb.NewServer(apiweb.Options{
 		DatabasePath: filepath.Join(dataRoot, "player-stats.db"),
 		UploadsPath:  filepath.Join(dataRoot, "uploads"),
+		TrisDir:      filepath.Join(filepath.Dir(executable), "tris"),
 		Assets:       assets,
 	})
 	if err != nil {
