@@ -1,5 +1,6 @@
 import { CheckCircle2, X, XCircle } from 'lucide-react';
 import { Job } from '@/api';
+import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
 export function JobsList({ jobs, onDismiss }: { jobs: Job[]; onDismiss: (job: Job) => void }) {
@@ -13,7 +14,7 @@ export function JobsList({ jobs, onDismiss }: { jobs: Job[]; onDismiss: (job: Jo
         const running = job.status === 'running';
         const percent = running ? Math.round(job.progress || (job.processed / total) * 100) : 0;
         return (
-          <div key={job.id} className="rounded-lg border border-border bg-card p-4">
+          <Card key={job.id} className="p-4">
             <div className="flex items-center justify-between gap-3 text-sm">
               <span className="flex min-w-0 items-center gap-2">
                 <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-warning" />
@@ -29,7 +30,7 @@ export function JobsList({ jobs, onDismiss }: { jobs: Job[]; onDismiss: (job: Jo
                 style={running ? { width: `${percent}%` } : undefined}
               />
             </div>
-          </div>
+          </Card>
         );
       })}
 
@@ -37,11 +38,11 @@ export function JobsList({ jobs, onDismiss }: { jobs: Job[]; onDismiss: (job: Jo
         const failed = job.status === 'failed';
         const result = job.result;
         return (
-          <div
+          <Card
             key={job.id}
             className={cn(
-              'flex items-start justify-between gap-3 rounded-lg border p-4',
-              failed ? 'border-destructive/40 bg-destructive/5' : 'border-border bg-card'
+              'flex items-start justify-between gap-3 p-4',
+              failed && 'border-destructive/40 bg-destructive/5'
             )}
           >
             <div className="min-w-0 space-y-1 text-sm">
@@ -73,7 +74,7 @@ export function JobsList({ jobs, onDismiss }: { jobs: Job[]; onDismiss: (job: Jo
             >
               <X className="size-4" />
             </button>
-          </div>
+          </Card>
         );
       })}
     </div>

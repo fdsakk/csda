@@ -10,14 +10,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@base-ui-components/react": "^1.0.0-rc.0",
+    "@base-ui/react": "^1.6.0",
     "@tailwindcss/vite": "^4.3.2",
     "@vitejs/plugin-react": "latest",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "geist": "^1.7.2",
     "lucide-react": "^1.24.0",
-    "radix-ui": "^1.6.2",
     "react": "latest",
     "react-dom": "latest",
     "tailwind-merge": "^3.6.0",

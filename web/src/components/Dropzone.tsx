@@ -2,6 +2,7 @@ import { DragEvent, useCallback, useRef, useState } from 'react';
 import { Upload, X } from 'lucide-react';
 import { Job, uploadDemos } from '@/api';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
 export function Dropzone({ onQueued }: { onQueued: (job: Job) => void }) {
@@ -30,10 +31,10 @@ export function Dropzone({ onQueued }: { onQueued: (job: Job) => void }) {
   };
 
   return (
-    <div className="rounded-lg border border-border bg-card">
+    <Card className="overflow-hidden">
       <div
         className={cn(
-          'flex flex-col items-center justify-center gap-2 rounded-t-lg border-b border-dashed border-border px-6 py-10 text-center transition-colors',
+          'flex flex-col items-center justify-center gap-2 border-b border-dashed border-border px-6 py-10 text-center transition-colors',
           dragging && 'border-ring bg-accent/50'
         )}
         onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
@@ -73,6 +74,6 @@ export function Dropzone({ onQueued }: { onQueued: (job: Job) => void }) {
         </div>
       ) : null}
       {error ? <p className="px-4 pb-4 text-sm text-destructive">{error}</p> : null}
-    </div>
+    </Card>
   );
 }
