@@ -145,6 +145,13 @@ func NewServer(options Options) (*Server, error) {
 	if options.Config.MinimumDemos == 0 {
 		options.Config = api.DefaultSuspicionConfig()
 	}
+	// A persisted config overrides the startup default so thresholds edited in
+	// the UI survive restarts.
+	if config, ok, err := api.GetThresholds(context.Background(), options.DatabasePath); err != nil {
+		return nil, err
+	} else if ok {
+		options.Config = config
+	}
 	if err := os.MkdirAll(options.UploadsPath, 0o755); err != nil {
 		return nil, err
 	}
@@ -252,6 +259,10 @@ func (s *Server) handleThresholdsPut(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := api.ValidateSuspicionConfig(config); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := api.SaveThresholds(r.Context(), s.options.DatabasePath, config); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	s.configMu.Lock()

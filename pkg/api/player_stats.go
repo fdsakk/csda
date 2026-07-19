@@ -310,6 +310,7 @@ CREATE TABLE IF NOT EXISTS evidence (
 );
 CREATE INDEX IF NOT EXISTS evidence_player_idx ON evidence(steam_id);
 CREATE INDEX IF NOT EXISTS evidence_demo_idx ON evidence(demo_id);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, CURRENT_TIMESTAMP);
 `)
 	if err != nil {
