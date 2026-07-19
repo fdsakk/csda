@@ -62,6 +62,14 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - name: Download and verify map geometry
+        run: |
+          python -m pip install --disable-pip-version-check awpy==2.0.2
+          awpy get tris
+          for map in de_mirage de_dust2 de_nuke de_ancient de_anubis; do
+            test -s "$HOME/.awpy/tris/$map.tri"
+          done
+
       - name: Build embedded dashboard
         working-directory: web
         run: |
@@ -79,11 +87,10 @@ jobs:
 
       - name: Generate portable archives
         run: |
-          cd bin/darwin-x64 && zip darwin-x64.zip csda && cd -
-          cd bin/darwin-arm64 && zip darwin-arm64.zip csda && cd -
-          cd bin/linux-x64 && zip linux-x64.zip csda && cd -
-          cd bin/linux-arm64 && zip linux-arm64.zip csda && cd -
-          cd bin/windows-x64 && zip windows-x64.zip csda.exe && cd -
+          for dir in darwin-x64 darwin-arm64 linux-x64 linux-arm64 windows-x64; do
+            cp -R "$HOME/.awpy/tris" "bin/$dir/tris"
+            (cd "bin/$dir" && zip -r "$dir.zip" csda* tris)
+          done
 
       - name: Upload portable archives
         uses: actions/upload-artifact@v7
@@ -110,6 +117,21 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+
+      - name: Download and verify map geometry
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check awpy==2.0.2
+          awpy get tris
+          $tris = Join-Path $HOME ".awpy\tris"
+          @("de_mirage", "de_dust2", "de_nuke", "de_ancient", "de_anubis") | ForEach-Object {
+            $path = Join-Path $tris "$_.tri"
+            if (-not (Test-Path $path -PathType Leaf) -or (Get-Item $path).Length -eq 0) {
+              throw "Missing map geometry: $path"
+            }
+          }
+          New-Item -ItemType Directory -Force bin/windows-x64 | Out-Null
+          Copy-Item $tris bin/windows-x64/tris -Recurse
 
       - name: Build embedded dashboard
         working-directory: web

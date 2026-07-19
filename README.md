@@ -126,7 +126,9 @@ The database and temporary uploads are kept under
 not delete that database.
 
 The same release also provides `windows-x64.zip`. For portable use, download the
-archive, extract it to a writable directory, and double-click `csda.exe`.
+archive, extract the complete archive to a writable directory, and double-click
+`csda.exe`. Keep the included `tris` directory next to the executable; it contains
+the map geometry required for demo analysis.
 
 #### Option 2: Docker Desktop
 
@@ -241,10 +243,10 @@ the executable (or launch it without arguments) to start the server on a free
 directory are stored under `%LOCALAPPDATA%\CS Demo Analyzer`; closing the console
 window stops the application.
 
-The portable release is a standalone `csda.exe`. The installer release contains
-the same executable, installs it under Program Files, creates a Start Menu shortcut
-and an uninstaller, and optionally creates a desktop shortcut. Updating or
-uninstalling the program does not remove the database in `%LOCALAPPDATA%`.
+The portable release contains `csda.exe` and a `tris` directory with the required
+map geometry. The installer installs both under Program Files, creates a Start Menu
+shortcut and an uninstaller, and optionally creates a desktop shortcut. Updating
+or uninstalling the program does not remove the database in `%LOCALAPPDATA%`.
 
 To start the embedded dashboard explicitly on any supported platform:
 
