@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  portable:
+  validate:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}
@@ -43,6 +43,14 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
+  portable:
+    needs: validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -52,6 +60,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: false
 
       - name: Build embedded dashboard
         working-directory: web
@@ -61,7 +70,7 @@ jobs:
 
       - name: Build portable binaries
         run: |
-          make VERSION='${{ steps.version.outputs.version }}' \
+          make VERSION='${{ needs.validate.outputs.version }}' \
             build-darwin \
             build-darwin-arm64 \
             build-linux \
@@ -77,14 +86,14 @@ jobs:
           cd bin/windows-x64 && zip windows-x64.zip csda.exe && cd -
 
       - name: Upload portable archives
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: portable-archives
           path: bin/**/*.zip
           if-no-files-found: error
 
   windows-installer:
-    needs: portable
+    needs: validate
     runs-on: windows-latest
 
     steps:
@@ -100,6 +109,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: false
 
       - name: Build embedded dashboard
         working-directory: web
@@ -114,7 +124,7 @@ jobs:
           $env:CGO_ENABLED = "0"
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
-          go build -trimpath "-ldflags=-s -w -X github.com/fdsakk/csda/pkg/cli.Version=${{ needs.portable.outputs.version }}" -o bin/windows-x64/csda.exe ./cmd/cli
+          go build -trimpath "-ldflags=-s -w -X github.com/fdsakk/csda/pkg/cli.Version=${{ needs.validate.outputs.version }}" -o bin/windows-x64/csda.exe ./cmd/cli
 
       - name: Install Inno Setup
         run: choco install innosetup --no-progress --yes
@@ -122,22 +132,22 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=${{ needs.portable.outputs.version }}" installer/windows.iss
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=${{ needs.validate.outputs.version }}" installer/windows.iss
 
       - name: Upload installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-installer
           path: bin/windows-x64/csda-windows-x64-setup.exe
           if-no-files-found: error
 
   release:
-    needs: [portable, windows-installer]
+    needs: [validate, portable, windows-installer]
     runs-on: ubuntu-latest
 
     steps:
       - name: Download release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-assets
           merge-multiple: true
@@ -148,5 +158,5 @@ jobs:
           artifacts: release-assets/**/*
           commit: ${{ github.sha }}
           generateReleaseNotes: true
-          name: CS Demo Analyzer ${{ needs.portable.outputs.tag }}
-          tag: ${{ needs.portable.outputs.tag }}
+          name: CS Demo Analyzer ${{ needs.validate.outputs.tag }}
+          tag: ${{ needs.validate.outputs.tag }}
