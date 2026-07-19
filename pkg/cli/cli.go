@@ -7,8 +7,8 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/akiver/cs-demo-analyzer/pkg/api"
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
+	"github.com/fdsakk/csda/pkg/api"
+	"github.com/fdsakk/csda/pkg/api/constants"
 )
 
 type cliArgs struct {

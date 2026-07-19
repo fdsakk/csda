@@ -1,7 +1,7 @@
 package api
 
 import (
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
+	"github.com/fdsakk/csda/pkg/api/constants"
 )
 
 func createPraccAnalyzer(analyzer *Analyzer) {

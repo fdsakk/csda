@@ -5,8 +5,8 @@ import (
 	"math"
 	"sort"
 
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
-	"github.com/akiver/cs-demo-analyzer/pkg/vis"
+	"github.com/fdsakk/csda/pkg/api/constants"
+	"github.com/fdsakk/csda/pkg/vis"
 	"github.com/golang/geo/r3"
 	"github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/common"
 	"github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/events"

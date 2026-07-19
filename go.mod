@@ -1,4 +1,4 @@
-module github.com/akiver/cs-demo-analyzer
+module github.com/fdsakk/csda
 
 go 1.23.0
 

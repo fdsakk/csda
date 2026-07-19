@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
+	"github.com/fdsakk/csda/pkg/api/constants"
 )
 
 // PlayerSuspicionRule records the strongest metric from an evidence group that

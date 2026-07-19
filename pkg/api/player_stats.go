@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/akiver/cs-demo-analyzer/internal/demo"
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
+	"github.com/fdsakk/csda/internal/demo"
+	"github.com/fdsakk/csda/pkg/api/constants"
 	_ "modernc.org/sqlite"
 )
 

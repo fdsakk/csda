@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
+	"github.com/fdsakk/csda/pkg/api/constants"
 )
 
 const (

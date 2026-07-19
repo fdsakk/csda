@@ -1,7 +1,7 @@
 package api
 
 import (
-	"github.com/akiver/cs-demo-analyzer/internal/converters"
+	"github.com/fdsakk/csda/internal/converters"
 	"github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/events"
 )
 

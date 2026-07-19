@@ -1,6 +1,6 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 # Strip debug info and stamp the version
-GO_FLAGS += "-ldflags=-s -w -X github.com/akiver/cs-demo-analyzer/pkg/cli.Version=$(VERSION)"
+GO_FLAGS += "-ldflags=-s -w -X github.com/fdsakk/csda/pkg/cli.Version=$(VERSION)"
 # Avoid embedding the build path in the executable for more reproducible builds
 GO_FLAGS += -trimpath
 BINARY_NAME=csda
@@ -64,38 +64,6 @@ build-all: build-web ## Run for all platforms, embedding the production dashboar
 		build-windows-binary \
 		build-js
 	@cp -r ./bin/. ./js/dist/bin
-
-npm-publish: # Publish a new version of the JS package to npm
-	@test -z $(IS_WINDOWS) || (echo "Publishing from a Windows machine is not allowed because chmod would not work for unix binaries" && false)
-	@test -n "$(VERSION)" || (echo "The environment variable VERSION must be provided" && false)
-	@npm --version > /dev/null || (echo "The npm CLI must be installed to publish" && false)
-	@echo "Checking for pending git changes..." && test -z "`git status --porcelain`" || \
-		(echo "Refusing to publish with these penging git changes:" && git status --porcelain && false)
-	@echo "Checking for main branch..." && test "`git rev-parse --abbrev-ref HEAD`" = main || \
-		(echo "Refusing to publish from non-main branch `git rev-parse --abbrev-ref HEAD`" && false)
-	@echo "Checking for unpushed commits..." && git fetch
-	@test "`git cherry`" = "" || (echo "Refusing to publish with unpushed commits" && false)
-
-	@"$(MAKE)" clean
-	@"$(MAKE)" build-all
-	git config --global user.name github-actions[bot]
-	git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
-	@cd js && \
-	npm version $(VERSION) --tag-version-prefix="" | awk '{print $$NF}' > /tmp/NEW_VERSION && \
-	git add package.json package-lock.json && \
-	git commit -m "chore: version `cat /tmp/NEW_VERSION`" && \
-	git tag v`cat /tmp/NEW_VERSION`
-
-	@test -z "`git status --porcelain`" || (echo "Aborting because git is somehow unclean after a commit" && false)
-	@cd js && \
-	npm stage publish && \
-	git push origin main --tags
-
-publish-minor: ## Publish a minor version of the JS package
-	@"$(MAKE)" VERSION=minor npm-publish
-
-publish-patch: ## Publish a patch version of the JS package
-	@"$(MAKE)" VERSION=patch npm-publish
 
 test: ## Run all tests
 	go test ./tests/ $(ARGS)

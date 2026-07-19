@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/akiver/cs-demo-analyzer/pkg/cli"
+	"github.com/fdsakk/csda/pkg/cli"
 )
 
 func main() {

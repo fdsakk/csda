@@ -3,8 +3,8 @@ package api
 import (
 	"fmt"
 
-	"github.com/akiver/cs-demo-analyzer/internal/math"
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
+	"github.com/fdsakk/csda/internal/math"
+	"github.com/fdsakk/csda/pkg/api/constants"
 	"github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/common"
 	"github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/events"
 )

@@ -300,8 +300,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/akiver/cs-demo-analyzer/pkg/api"
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
+	"github.com/fdsakk/csda/pkg/api"
+	"github.com/fdsakk/csda/pkg/api/constants"
 )
 
 func main() {
@@ -333,8 +333,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/akiver/cs-demo-analyzer/pkg/api"
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
+	"github.com/fdsakk/csda/pkg/api"
+	"github.com/fdsakk/csda/pkg/api/constants"
 )
 
 func main() {
@@ -366,43 +366,12 @@ package main
 import (
 	"os"
 
-	"github.com/akiver/cs-demo-analyzer/pkg/cli"
+	"github.com/fdsakk/csda/pkg/cli"
 )
 
 func main() {
 	os.Exit(cli.Run(os.Args[1:]))
 }
-```
-
-### Node.js API
-
-A Node.js module called `@akiver/cs-demo-analyzer` is available on NPM.  
-It exposes a function that under the hood is a wrapper around the Go CLI.  
-The module also exports TypeScript types and constants.
-
-```js
-import { analyzeDemo, DemoSource, ExportFormat } from '@akiver/cs-demo-analyzer';
-
-async function main() {
-  await analyzeDemo({
-    demoPath: './myDemo.dem',
-    outputFolderPath: '.',
-    format: ExportFormat.JSON,
-    source: DemoSource.Valve,
-    analyzePositions: false,
-    minify: false,
-    onStderr: console.error,
-    onStdout: console.log,
-    onStart: () => {
-      console.log('Starting!');
-    },
-    onEnd: () => {
-      console.log('Done!');
-    },
-  });
-}
-
-main();
 ```
 
 ## Developing
@@ -504,4 +473,4 @@ This project uses the demo parser [demoinfocs-golang](https://github.com/markus-
 
 ## License
 
-[MIT](https://github.com/akiver/cs-demo-analyzer/blob/main/LICENSE.md)
+[MIT](LICENSE.md)

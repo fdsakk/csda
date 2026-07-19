@@ -26,7 +26,7 @@ COPY . .
 # The source context intentionally excludes web/dist. Copy the freshly built
 # dashboard so go:embed can compile and the server binary stays self-contained.
 COPY --from=web /web/dist /src/web/dist
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X github.com/akiver/cs-demo-analyzer/pkg/cli.Version=${VERSION}" -o /out/csda ./cmd/cli
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X github.com/fdsakk/csda/pkg/cli.Version=${VERSION}" -o /out/csda ./cmd/cli
 
 # 4. Minimal runtime image
 FROM gcr.io/distroless/static-debian12

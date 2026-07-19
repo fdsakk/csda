@@ -11,7 +11,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/akiver/cs-demo-analyzer/pkg/api"
+	"github.com/fdsakk/csda/pkg/api"
 )
 
 func TestStaticAssetsAndSPAFallback(t *testing.T) {

@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/akiver/cs-demo-analyzer/internal/converters"
-	"github.com/akiver/cs-demo-analyzer/internal/csv"
-	"github.com/akiver/cs-demo-analyzer/internal/slice"
+	"github.com/fdsakk/csda/internal/converters"
+	"github.com/fdsakk/csda/internal/csv"
+	"github.com/fdsakk/csda/internal/slice"
 	"github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/common"
 )
 

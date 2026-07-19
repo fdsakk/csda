@@ -6,13 +6,13 @@ body:
       value: |
         This form is only for submitting bug reports.
         If you have a usage question or are unsure if it's a bug, please post a question in the 
-        [Discussions tab](https://github.com/akiver/cs-demo-analyzer/discussions).
-        If it's a feature request please use the [feature request form](https://github.com/akiver/cs-demo-analyzer/issues/new?template=feature_requset.yml).
+        [Discussions tab](https://github.com/fdsakk/csda/discussions).
+        If it's a feature request please use the [feature request form](https://github.com/fdsakk/csda/issues/new?template=feature_requset.yml).
 
         Before submitting a new bug/issue, please check the links below to see if there is a solution or question posted there already:
-         - [Open issues](https://github.com/akiver/cs-demo-analyzer/issues?q=is%3Aissue+is%3Aopen+sort%3Aupdated-desc)
-         - [Closed issues](https://github.com/akiver/cs-demo-analyzer/issues?q=is%3Aissue+sort%3Aupdated-desc+is%3Aclosed)
-         - [Discussions tab](https://github.com/akiver/cs-demo-analyzer/discussions)
+         - [Open issues](https://github.com/fdsakk/csda/issues?q=is%3Aissue+is%3Aopen+sort%3Aupdated-desc)
+         - [Closed issues](https://github.com/fdsakk/csda/issues?q=is%3Aissue+sort%3Aupdated-desc+is%3Aclosed)
+         - [Discussions tab](https://github.com/fdsakk/csda/discussions)
 
         If an issue already exists do not create a new one, and instead 👍 upvote the existing one.
   - type: textarea
