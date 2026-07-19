@@ -37,8 +37,8 @@ build-linux-arm64: ## Build for Linux arm64
 
 build-web: ## Build the production React dashboard
 	@cd web && \
-	npm ci && \
-	npm run build
+	bun install --frozen-lockfile && \
+	bun run build
 
 build-windows-binary:
 	@mkdir -p bin/windows-x64

@@ -77,8 +77,8 @@ build, use server mode:
 
 ```bash
 cd web
-npm install
-npm run build
+bun install --frozen-lockfile
+bun run build
 cd ..
 csda web --db=player-stats.db --uploads=uploads --assets=web/dist --source=valve
 ```

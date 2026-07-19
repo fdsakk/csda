@@ -72,12 +72,10 @@ jobs:
         with:
           ref: ${{ needs.publish.outputs.tag }}
 
-      - name: Setup Node
-        uses: actions/setup-node@v6
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          bun-version: 1.3.0
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -87,8 +85,8 @@ jobs:
       - name: Build embedded dashboard
         working-directory: web
         run: |
-          npm ci
-          npm run build
+          bun install --frozen-lockfile
+          bun run build
 
       - name: Build portable executable
         shell: pwsh

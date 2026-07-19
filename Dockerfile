@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 
-# 1. Build the web UI (Vite + React) -> static assets in /web/dist
-FROM oven/bun:1 AS web
+# 1. Build the web UI (Vite + React) -> static assets in /web/dist.
+# Pin Bun so different machines never rewrite the lockfile format.
+FROM oven/bun:1.3.0 AS web
 WORKDIR /web
 COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile
@@ -22,6 +23,9 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+# The source context intentionally excludes web/dist. Copy the freshly built
+# dashboard so go:embed can compile and the server binary stays self-contained.
+COPY --from=web /web/dist /src/web/dist
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X github.com/akiver/cs-demo-analyzer/pkg/cli.Version=${VERSION}" -o /out/csda ./cmd/cli
 
 # 4. Minimal runtime image

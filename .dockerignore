@@ -1,6 +1,10 @@
 .git
+.cache
+.tools
+bin
 web/node_modules
 web/dist
+web/.npm-cache
 uploads
 sample-demos
 sample-analysis
