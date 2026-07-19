@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 
-type ConfigKey = keyof SuspicionConfig;
+type ConfigKey = Exclude<keyof SuspicionConfig, 'flagMode'>;
 
 type Field = {
   key: ConfigKey;
@@ -19,7 +19,9 @@ type Field = {
   max?: number;
 };
 
-const GROUPS: { title: string; description: string; fields: Field[] }[] = [
+type Group = { title: string; description: string; modes?: SuspicionConfig['flagMode'][]; fields: Field[] };
+
+const GROUPS: Group[] = [
   {
     title: 'Minimum evidence',
     description: 'A player stays in Low sample until both player-level minimums are met. Timing rules also require their own encounter sample.',
@@ -33,6 +35,7 @@ const GROUPS: { title: string; description: string; fields: Field[] }[] = [
   {
     title: 'Final score bands',
     description: 'The fused score is mapped to Normal, Watch or Cheater only after every evidence group has been combined.',
+    modes: ['score'],
     fields: [
       { key: 'scoreWatchThreshold', label: 'Watch score', description: 'Minimum final score for Watch.', suffix: '/100', min: 0, max: 100 },
       { key: 'scoreCheaterThreshold', label: 'Cheater score', description: 'Minimum final score for Cheater.', suffix: '/100', min: 0, max: 100 },
@@ -42,6 +45,7 @@ const GROUPS: { title: string; description: string; fields: Field[] }[] = [
   {
     title: 'Evidence mapping and confidence',
     description: 'Metric anchors become soft evidence rather than immediate verdicts. Sample confidence prevents a small sample from carrying full strength.',
+    modes: ['score'],
     fields: [
       { key: 'metricWatchEvidence', label: 'Watch-anchor evidence', description: 'Evidence assigned at a metric’s watch anchor.', step: 1, suffix: '%', percent: true },
       { key: 'metricCheaterEvidence', label: 'Cheater-anchor evidence', description: 'Evidence assigned at a metric’s cheater anchor.', step: 1, suffix: '%', percent: true },
@@ -52,6 +56,7 @@ const GROUPS: { title: string; description: string; fields: Field[] }[] = [
   {
     title: 'Rifle timing anchors',
     description: 'Non-AWP weighted averages. Lower values produce stronger timing evidence.',
+    modes: ['score'],
     fields: [
       { key: 'ttdSuspiciousMs', label: 'TTD watch anchor', description: 'TTD at this value receives watch-anchor evidence.', suffix: 'ms' },
       { key: 'ttdCheaterMs', label: 'TTD cheater anchor', description: 'TTD at this value receives cheater-anchor evidence.', suffix: 'ms' },
@@ -62,6 +67,7 @@ const GROUPS: { title: string; description: string; fields: Field[] }[] = [
   {
     title: 'AWP timing anchors',
     description: 'AWP has separate anchors because one-shot flicks naturally produce lower TTD.',
+    modes: ['score'],
     fields: [
       { key: 'awpTtdWatchMs', label: 'Evidence start', description: 'AWP TTD begins producing evidence below this value.', suffix: 'ms' },
       { key: 'awpTtdCheaterMs', label: 'Cheater anchor', description: 'AWP evidence reaches full strength at this value.', suffix: 'ms' },
@@ -71,6 +77,7 @@ const GROUPS: { title: string; description: string; fields: Field[] }[] = [
   {
     title: 'Precision anchors',
     description: 'Head-hit and accuracy share one support group. They can strengthen suspicious timing but can never create a flag by themselves.',
+    modes: ['score'],
     fields: [
       { key: 'eliteHeadHitRate', label: 'Head-hit evidence start', description: 'First soft head-hit evidence anchor.', step: 1, suffix: '%', percent: true },
       { key: 'headHitWatchThreshold', label: 'Head-hit watch anchor', description: 'Middle head-hit evidence anchor.', step: 1, suffix: '%', percent: true },
@@ -82,14 +89,63 @@ const GROUPS: { title: string; description: string; fields: Field[] }[] = [
   {
     title: 'Performance anchors',
     description: 'K/D cannot flag a player by itself. It only supports timing evidence, and does not stack with precision support.',
+    modes: ['score'],
     fields: [
       { key: 'eliteKd', label: 'K/D watch anchor', description: 'Start of K/D supporting evidence.', step: 0.1, min: 0.1 },
       { key: 'eliteKdCheater', label: 'K/D cheater anchor', description: 'High K/D supporting evidence.', step: 0.1, min: 0.1 },
     ],
   },
   {
+    title: 'Rifle timing thresholds',
+    description: 'Non-AWP weighted averages. Below the watch bound → Watch, below the cheater bound → Cheater.',
+    modes: ['manual'],
+    fields: [
+      { key: 'ttdSuspiciousMs', label: 'TTD watch bound', description: 'TTD below this flags Watch.', suffix: 'ms' },
+      { key: 'ttdCheaterMs', label: 'TTD cheater bound', description: 'TTD below this flags Cheater.', suffix: 'ms' },
+      { key: 'reactionWatchMs', label: 'Reaction watch bound', description: 'Reaction below this flags Watch.', suffix: 'ms' },
+      { key: 'reactionCheaterMs', label: 'Reaction cheater bound', description: 'Reaction below this flags Cheater.', suffix: 'ms' },
+    ],
+  },
+  {
+    title: 'AWP timing thresholds',
+    description: 'AWP has separate, lower bounds because one-shot flicks naturally produce lower TTD.',
+    modes: ['manual'],
+    fields: [
+      { key: 'awpTtdWatchMs', label: 'AWP watch bound', description: 'AWP TTD below this flags Watch.', suffix: 'ms' },
+      { key: 'awpTtdCheaterMs', label: 'AWP cheater bound', description: 'AWP TTD below this flags Cheater.', suffix: 'ms' },
+    ],
+  },
+  {
+    title: 'Head-hit thresholds',
+    description: 'Gated by the head-hit sample minimum. At or above a bound → flag.',
+    modes: ['manual'],
+    fields: [
+      { key: 'headHitWatchThreshold', label: 'Head-hit watch bound', description: 'Head-hit rate at or above this flags Watch.', step: 1, suffix: '%', percent: true },
+      { key: 'headHitCheaterThreshold', label: 'Head-hit cheater bound', description: 'Head-hit rate at or above this flags Cheater.', step: 1, suffix: '%', percent: true },
+    ],
+  },
+  {
+    title: 'Accuracy thresholds',
+    description: 'Overall accuracy across all tracked shots.',
+    modes: ['manual'],
+    fields: [
+      { key: 'eliteAccuracy', label: 'Accuracy watch bound', description: 'Accuracy at or above this flags Watch.', step: 1, suffix: '%', percent: true },
+      { key: 'accuracyCheater', label: 'Accuracy cheater bound', description: 'Accuracy at or above this flags Cheater.', step: 1, suffix: '%', percent: true },
+    ],
+  },
+  {
+    title: 'K/D thresholds',
+    description: 'Kill/death ratio across all enabled demos.',
+    modes: ['manual'],
+    fields: [
+      { key: 'eliteKd', label: 'K/D watch bound', description: 'K/D at or above this flags Watch.', step: 0.1, min: 0.1 },
+      { key: 'eliteKdCheater', label: 'K/D cheater bound', description: 'K/D at or above this flags Cheater.', step: 0.1, min: 0.1 },
+    ],
+  },
+  {
     title: 'Evidence fusion',
     description: 'Timing is required for every flag. Precision or K/D can add only a bounded support bonus after correlated metrics are collapsed.',
+    modes: ['score'],
     fields: [
       { key: 'timingWeight', label: 'Timing weight', description: 'Strength of the timing group.', step: 1, suffix: '%', percent: true },
       { key: 'awpTimingWeight', label: 'AWP timing weight', description: 'Reduces AWP evidence for one-shot kills and held angles.', step: 1, suffix: '%', percent: true },
@@ -171,18 +227,35 @@ export function ThresholdsDialog({ onChanged }: { onChanged: () => void }) {
       <SheetContent className="w-full gap-0 p-0 sm:max-w-3xl" aria-label="Threshold settings">
         <SheetHeader className="border-b border-border px-5 py-4 pr-12 text-left">
           <SheetTitle className="text-base">Watch and cheater thresholds</SheetTitle>
-          <SheetDescription>Tune the complete aggregate evidence score. Changes apply immediately to the current report.</SheetDescription>
+          <SheetDescription>Choose the flagging mode and tune its thresholds. Changes apply immediately to the current report.</SheetDescription>
         </SheetHeader>
 
         <div className="cheat-sheet-scroll min-h-0 flex-1 overflow-y-auto px-5 py-4">
               {loading ? <p className="py-16 text-center text-sm text-muted-foreground">Loading thresholds…</p> : null}
               {!loading && config ? (
                 <div>
-                  <p className="border-b border-border pb-4 text-sm leading-5 text-muted-foreground">
-                    <span className="font-medium text-foreground">How the score works: </span>
-                    Timing is required. Accuracy, head-hit and K/D only add bounded support, while AWP timing has its own lower weight and curve. The final score maps the result to Normal, Watch or Cheater.
-                  </p>
-                  {GROUPS.map((group) => (
+                  <div className="flex items-center gap-3 border-b border-border pb-4">
+                    <div className="inline-flex flex-none rounded-md border border-border p-0.5">
+                      {(['score', 'manual'] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          className={cn(
+                            'rounded-[5px] px-3 py-1 text-sm capitalize',
+                            config.flagMode === mode ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
+                          )}
+                          onClick={() => setConfig((current) => (current ? { ...current, flagMode: mode } : current))}
+                        >
+                          {mode}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs leading-4 text-muted-foreground">
+                      {config.flagMode === 'manual'
+                        ? 'Each stat is checked against its own watch and cheater bound; the worst tier wins. No fused score.'
+                        : 'Evidence is fused into a 0–100 score. Timing is required; accuracy, head-hit and K/D only add bounded support.'}
+                    </p>
+                  </div>
+                  {GROUPS.filter((group) => !group.modes || group.modes.includes(config.flagMode)).map((group) => (
                     <section key={group.title} className="border-b border-border py-4 last:border-0">
                       <div className="mb-3">
                         <h3 className="text-sm font-semibold text-foreground">{group.title}</h3>
@@ -207,7 +280,7 @@ export function ThresholdsDialog({ onChanged }: { onChanged: () => void }) {
         <SheetFooter className="flex-row flex-wrap items-center justify-between gap-2 border-t border-border px-5 py-3">
               <div>{message ? <p className={cn('text-sm', failed ? 'text-destructive' : 'text-muted-foreground')}>{message}</p> : null}</div>
               <div className="ml-auto flex gap-2">
-                <Button size="sm" variant="outline" disabled={!defaults || loading || saving} onClick={() => { if (defaults) { setConfig({ ...defaults }); setMessage(''); } }}>
+                <Button size="sm" variant="outline" disabled={!defaults || loading || saving} onClick={() => { if (defaults) { setConfig((current) => ({ ...defaults, flagMode: current?.flagMode ?? defaults.flagMode })); setMessage(''); } }}>
                   <RotateCcw className="size-4" /> Reset to defaults
                 </Button>
                 <Button size="sm" disabled={!config || loading || saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save thresholds'}</Button>
