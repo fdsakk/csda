@@ -49,7 +49,7 @@ export function Dropzone({ onQueued }: { onQueued: (job: Job) => void }) {
         <Button variant="outline" size="sm" onClick={() => input.current?.click()}>Browse files</Button>
       </div>
 
-      <div className="flex flex-col gap-3 border-t border-border p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 flex-wrap gap-2">
           {files.length ? files.map((file) => (
             <span key={`${file.name}:${file.size}`} className="flex max-w-full items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
