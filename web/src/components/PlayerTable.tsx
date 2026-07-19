@@ -35,13 +35,13 @@ const PAGE_SIZES = [12, 25, 50, 100];
 // Table view state survives reloads (the page refreshes itself after analysis).
 const STORAGE_KEY = 'csda.playerTable';
 
-type StoredTableState = { filters?: Partial<TableFilters>; sortKey?: SortKey; ascending?: boolean; pageSize?: number };
+type StoredTableState = { filters?: Partial<TableFilters>; sortKey?: SortKey; ascending?: boolean; pageSize?: number | 'all' };
 
 function loadStoredState(): StoredTableState {
   try {
     const state: StoredTableState = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
     if (!COLUMNS.some((column) => column.key === state.sortKey)) delete state.sortKey;
-    if (!PAGE_SIZES.includes(state.pageSize ?? 0)) delete state.pageSize;
+    if (state.pageSize !== 'all' && !PAGE_SIZES.includes(state.pageSize ?? 0)) delete state.pageSize;
     return state;
   } catch {
     return {};
@@ -82,12 +82,11 @@ export function PlayerTable({
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
   const [filters, setFilters] = useState<TableFilters>({ ...DEFAULT_FILTERS, ...stored.filters });
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [pageSize, setPageSize] = useState(stored.pageSize ?? 12);
+  const [pageSize, setPageSize] = useState<number | 'all'>(stored.pageSize ?? 12);
   const [sortKey, setSortKey] = useState<SortKey>(stored.sortKey ?? 'status');
   const [ascending, setAscending] = useState(stored.ascending ?? false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [page, setPage] = useState(0);
-  const [showAll, setShowAll] = useState(false);
 
   const columns = scoreMode ? COLUMNS : COLUMNS.filter((column) => column.key !== 'suspicionScore');
 
@@ -123,9 +122,9 @@ export function PlayerTable({
 
   useEffect(() => { setPage(0); }, [deferredQuery, filters, sortKey, ascending, pageSize]);
 
-  const pageCount = Math.max(1, Math.ceil(shown.length / pageSize));
+  const pageCount = pageSize === 'all' ? 1 : Math.max(1, Math.ceil(shown.length / pageSize));
   const currentPage = Math.min(page, pageCount - 1);
-  const visible = showAll ? shown : shown.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+  const visible = pageSize === 'all' ? shown : shown.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
 
   return (
     <div className="space-y-4">
@@ -139,12 +138,13 @@ export function PlayerTable({
           Filters
           <Badge variant="outline" className={cn(!countActiveFilters(filters) && 'invisible')}>{countActiveFilters(filters)}</Badge>
         </Button>
-        <Select value={String(pageSize)} onValueChange={(value) => { setPageSize(Number(value)); setShowAll(false); }}>
+        <Select value={String(pageSize)} onValueChange={(value) => setPageSize(value === 'all' ? 'all' : Number(value))}>
           <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
           <SelectContent>
             {PAGE_SIZES.map((size) => (
               <SelectItem key={size} value={String(size)}>{size} / page</SelectItem>
             ))}
+            <SelectItem value="all">All</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -184,7 +184,7 @@ export function PlayerTable({
                     ) : null}
                     <TableCell>
                       <div className="flex items-center gap-1.5 font-medium">
-                        {player.name}
+                        <span className="max-w-56 truncate" title={player.name}>{player.name}</span>
                         {player.isAwper ? (
                           <Badge variant="outline" title={`${player.awpKills} AWP kills (${pct(player.awpKillRate)} of all kills)`}>AWPer</Badge>
                         ) : null}
@@ -241,24 +241,17 @@ export function PlayerTable({
         <p className="text-sm text-muted-foreground">
           {shown.length} of {players.length} players · click a row for signal detail
         </p>
-        <div className="flex items-center gap-2">
-          {!showAll && pageCount > 1 ? (
-            <>
-              <Button variant="outline" size="sm" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
-                <ChevronLeft className="size-4" />
-              </Button>
-              <span className="text-sm tabular-nums text-muted-foreground">{currentPage + 1} / {pageCount}</span>
-              <Button variant="outline" size="sm" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}>
-                <ChevronRight className="size-4" />
-              </Button>
-            </>
-          ) : null}
-          {shown.length > pageSize ? (
-            <Button variant="ghost" size="sm" onClick={() => { setShowAll((value) => !value); setPage(0); }}>
-              {showAll ? 'Show pages' : 'Show all'}
+        {pageCount > 1 ? (
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
+              <ChevronLeft className="size-4" />
             </Button>
-          ) : null}
-        </div>
+            <span className="text-sm tabular-nums text-muted-foreground">{currentPage + 1} / {pageCount}</span>
+            <Button variant="outline" size="sm" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}>
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
