@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { RotateCcw, SlidersHorizontal } from 'lucide-react';
+import { Info, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import { getThresholds, setThresholds, SuspicionConfig } from '@/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 type ConfigKey = Exclude<keyof SuspicionConfig, 'flagMode'>;
@@ -156,6 +157,19 @@ const GROUPS: Group[] = [
   },
 ];
 
+function InfoTip({ text }: { text: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" aria-label="More info" className="text-muted-foreground hover:text-foreground">
+          <Info className="size-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{text}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function ThresholdField({ field, config, onChange }: { field: Field; config: SuspicionConfig; onChange: (key: ConfigKey, value: number) => void }) {
   const shown = field.percent ? config[field.key] * 100 : config[field.key];
   return (
@@ -220,6 +234,7 @@ export function ThresholdsDialog({ onChanged }: { onChanged: () => void }) {
   };
 
   return (
+    <TooltipProvider>
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         <Button variant="outline" size="sm"><SlidersHorizontal className="size-4" /> Thresholds</Button>
@@ -249,17 +264,17 @@ export function ThresholdsDialog({ onChanged }: { onChanged: () => void }) {
                         </button>
                       ))}
                     </div>
-                    <p className="text-xs leading-4 text-muted-foreground">
-                      {config.flagMode === 'manual'
+                    <InfoTip
+                      text={config.flagMode === 'manual'
                         ? 'Each stat is checked against its own watch and cheater bound; the worst tier wins. No fused score.'
                         : 'Evidence is fused into a 0–100 score. Timing is required; accuracy, head-hit and K/D only add bounded support.'}
-                    </p>
+                    />
                   </div>
                   {GROUPS.filter((group) => !group.modes || group.modes.includes(config.flagMode)).map((group) => (
                     <section key={group.title} className="border-b border-border py-4 last:border-0">
-                      <div className="mb-3">
+                      <div className="mb-3 flex items-center gap-1.5">
                         <h3 className="text-sm font-semibold text-foreground">{group.title}</h3>
-                        <p className="mt-0.5 text-xs leading-4 text-muted-foreground">{group.description}</p>
+                        <InfoTip text={group.description} />
                       </div>
                       <div className="flex flex-wrap gap-3">
                         {group.fields.map((field) => (
@@ -288,5 +303,6 @@ export function ThresholdsDialog({ onChanged }: { onChanged: () => void }) {
         </SheetFooter>
       </SheetContent>
     </Sheet>
+    </TooltipProvider>
   );
 }
