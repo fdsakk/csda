@@ -3,7 +3,8 @@
 #endif
 
 #define MyAppName "CS Demo Analyzer"
-#define MyAppPublisher "akiver"
+#define MyAppPublisher "fdsakk"
+#define MyAppURL "https://github.com/fdsakk/csda"
 #define MyAppExeName "csda.exe"
 
 [Setup]
@@ -11,6 +12,9 @@ AppId={{5CA42964-313E-4DA6-A563-D15D26B0CD4A}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}/issues
+AppUpdatesURL={#MyAppURL}/releases/latest
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
