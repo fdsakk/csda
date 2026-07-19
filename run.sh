@@ -12,18 +12,19 @@ if [ -f .env ]; then
   set +a
 fi
 
-# Pick a package manager for the frontend build.
-if command -v bun >/dev/null 2>&1; then
-  PM=bun
-elif command -v npm >/dev/null 2>&1; then
-  PM=npm
-else
-  echo "error: need bun or npm to build the web UI" >&2
+# Bun is the repository's only frontend package manager. Keep its version in
+# sync with web/package.json and the Docker/CI configuration.
+if ! command -v bun >/dev/null 2>&1; then
+  echo "error: Bun 1.3.0 is required to build the web UI" >&2
+  exit 1
+fi
+if [ "$(bun --version)" != "1.3.0" ]; then
+  echo "error: Bun 1.3.0 is required (found $(bun --version))" >&2
   exit 1
 fi
 
-echo "Building web UI with $PM..."
-(cd web && "$PM" install && "$PM" run build)
+echo "Building web UI with Bun..."
+(cd web && bun install --frozen-lockfile && bun run build)
 
 echo "Starting web server..."
 exec go run ./cmd/cli web "$@"

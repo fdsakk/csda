@@ -1,12 +1,192 @@
 # CS Demo Analyzer
 
-A CLI to analyze and export CS2/CS:GO demos.
+CS Demo Analyzer is a local application for analyzing CS2 and CS:GO demo files.
+Its browser dashboard builds a persistent player database, aggregates statistics
+across many matches, and highlights timing or accuracy evidence worth reviewing.
+It also includes a command-line analyzer and Go/Node.js APIs for exporting raw
+demo data.
 
-## Usage
+The application runs locally. Uploaded `.dem` files are processed on your
+machine, while the resulting statistics are stored in SQLite. The review score
+is a prioritization aid, not a cheating probability or an automatic verdict.
 
-Ready-to-use binaries are available on the [releases page](https://github.com/akiver/cs-demo-analyzer/releases).
+## Installation and startup
 
-### Options
+Choose one of the methods below. Docker is the simplest cross-platform option;
+the Windows installer is the simplest native desktop option.
+
+### Linux
+
+#### Option 1: Docker Compose
+
+Requirements:
+
+- A 64-bit Linux system
+- Docker Engine with the Docker Compose plugin
+- Port `8080` available locally
+
+Steps:
+
+1. Clone the repository and enter it:
+
+   ```bash
+   git clone https://github.com/fdsakk/csda.git
+   cd csda
+   ```
+
+2. Build and start the application:
+
+   ```bash
+   docker compose up --build -d
+   ```
+
+3. Open [http://localhost:8080](http://localhost:8080) in a browser.
+4. Drop one or more `.dem` files into the upload area.
+
+The database is persisted in the Docker volume `csda-data`. Useful commands:
+
+```bash
+# Follow application logs
+docker compose logs -f
+
+# Stop the application without deleting its database
+docker compose down
+
+# Rebuild after pulling a new version
+git pull
+docker compose up --build -d
+```
+
+#### Option 2: Native development startup with `run.sh`
+
+This method builds the dashboard and runs the Go server directly on Linux.
+
+Requirements:
+
+- Git
+- Go 1.23 or newer
+- Bun 1.3.0
+- Port `8080` available locally
+
+Steps:
+
+1. Clone the repository and enter it:
+
+   ```bash
+   git clone https://github.com/fdsakk/csda.git
+   cd csda
+   ```
+
+2. Start the application:
+
+   ```bash
+   ./run.sh
+   ```
+
+   If the executable bit was lost while copying the repository, restore it with
+   `chmod +x run.sh` first.
+
+3. Open [http://127.0.0.1:8080](http://127.0.0.1:8080).
+4. Stop the server with `Ctrl+C`.
+
+Extra server arguments are forwarded by the script. For example:
+
+```bash
+./run.sh --addr=127.0.0.1:9000 --db=player-stats.db --uploads=uploads
+```
+
+The native method stores `player-stats.db` and `uploads/` in the repository by
+default.
+
+### Windows
+
+#### Option 1: Windows installer
+
+Requirements:
+
+- 64-bit Windows 10 or Windows 11
+- Permission to install applications
+- A modern web browser
+
+Steps:
+
+1. Open the [latest release](https://github.com/fdsakk/csda/releases/latest).
+2. Download `csda-windows-x64-setup.exe`.
+3. Run the downloaded installer and approve the Windows security prompt.
+4. Choose the installation directory and optionally enable the desktop shortcut.
+5. Finish the wizard, then launch **CS Demo Analyzer** from the Start Menu or
+   desktop shortcut.
+6. The application starts a local server on a free loopback port and opens the
+   dashboard in your default browser. Keep its console window open while using
+   the application; closing it stops the server.
+
+The installer places the program under Program Files and creates an uninstaller.
+The database and temporary uploads are kept under
+`%LOCALAPPDATA%\CS Demo Analyzer`. Updating or uninstalling the application does
+not delete that database.
+
+The same release also provides `windows-x64.zip`. For portable use, download the
+archive, extract it to a writable directory, and double-click `csda.exe`.
+
+#### Option 2: Docker Desktop
+
+Requirements:
+
+- 64-bit Windows 10 or Windows 11
+- Docker Desktop using Linux containers (WSL 2 backend recommended)
+- Git
+- Port `8080` available locally
+
+Steps in PowerShell:
+
+1. Start Docker Desktop and wait until its engine is running.
+2. Clone and enter the repository:
+
+   ```powershell
+   git clone https://github.com/fdsakk/csda.git
+   cd csda
+   ```
+
+3. Build and start the application:
+
+   ```powershell
+   docker compose up --build -d
+   ```
+
+4. Open [http://localhost:8080](http://localhost:8080).
+5. To stop it later without deleting the database, run:
+
+   ```powershell
+   docker compose down
+   ```
+
+Docker stores the database in the `csda-data` volume.
+
+### Optional authentication
+
+By default, the dashboard is unauthenticated and only intended for local use.
+To enable HTTP Basic Auth for either Docker or `run.sh`:
+
+1. Copy `.env.example` to `.env`.
+2. Set both values to strong credentials:
+
+   ```dotenv
+   CSDA_AUTH_USER=admin
+   CSDA_AUTH_PASSWORD=replace-with-a-strong-password
+   ```
+
+3. Restart the application.
+
+Only `/api/health` remains unauthenticated. Put the service behind HTTPS before
+exposing it outside a trusted network.
+
+## CLI and API reference
+
+Ready-to-use binaries are available on the [releases page](https://github.com/fdsakk/csda/releases).
+
+### Command-line usage
+
+#### Options
 
 ```
 csda -help
@@ -26,7 +206,7 @@ Usage of csda:
         Force demo's source, valid values: [challengermode,ebot,esea,esl,esportal,faceit,fastcup,5eplay,perfectworld,popflash,valve]
 ```
 
-### Examples
+#### Examples
 
 Export a demo into CSV files in the current folder.
 
