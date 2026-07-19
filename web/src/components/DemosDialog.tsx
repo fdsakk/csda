@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 const QUALITY_REASON_LABEL: Record<string, string> = {
@@ -96,6 +97,7 @@ export function DemosDialog({ demos, onChanged }: { demos: Demo[]; onChanged: ()
         </Button>
       </SheetTrigger>
       <SheetContent className="w-full gap-0 overflow-hidden p-0 sm:max-w-6xl">
+        <TooltipProvider>
         <div className="flex h-full min-h-0 flex-col">
           <SheetHeader className="flex-row flex-wrap items-center justify-between gap-4 border-b border-border px-6 py-4 pr-14 text-left">
             <div>
@@ -129,7 +131,7 @@ export function DemosDialog({ demos, onChanged }: { demos: Demo[]; onChanged: ()
 
           {demos.length ? (
             <div className="cheat-sheet-scroll min-h-0 flex-1 overflow-auto">
-              <Table className="min-w-[920px]">
+              <Table className="min-w-[920px] [&_td:first-child]:pl-6 [&_th:first-child]:pl-6">
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
                       {['In stats', 'Quality', 'File', 'Map', 'Played', 'Source', 'Origin', 'Players', 'Rounds', 'Added', ''].map((label, index) => (
@@ -156,7 +158,8 @@ export function DemosDialog({ demos, onChanged }: { demos: Demo[]; onChanged: ()
                                 onChange={() => void toggleDay(key, !allEnabled)}
                               />
                             </TableCell>
-                            <TableCell colSpan={10} className="text-xs font-medium text-muted-foreground">
+                            <TableCell />
+                            <TableCell colSpan={9} className="text-xs font-medium text-muted-foreground">
                               {key === 'unknown' ? 'Unknown date' : new Date(key).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                               {' · '}{enabledInDay}/{dayDemos.length} in stats
                             </TableCell>
@@ -199,7 +202,24 @@ export function DemosDialog({ demos, onChanged }: { demos: Demo[]; onChanged: ()
                                   <span className="text-xs text-muted-foreground">Analyzed</span>
                                 )}
                               </TableCell>
-                              <TableCell className="tabular-nums">{demo.players}</TableCell>
+                              <TableCell className="tabular-nums">
+                                {demo.playerNames?.length ? (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="cursor-default underline decoration-dotted underline-offset-2">{demo.players}</span>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <ul className="space-y-0.5 text-xs">
+                                        {demo.playerNames.map((name, index) => (
+                                          <li key={`${name}-${index}`}>{name}</li>
+                                        ))}
+                                      </ul>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                ) : (
+                                  demo.players
+                                )}
+                              </TableCell>
                               <TableCell className="tabular-nums">{demo.rounds}</TableCell>
                               <TableCell className="tabular-nums">{demo.importedAt ? new Date(demo.importedAt).toLocaleDateString() : '—'}</TableCell>
                               <TableCell className="w-[1%] px-2">
@@ -224,6 +244,7 @@ export function DemosDialog({ demos, onChanged }: { demos: Demo[]; onChanged: ()
             <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">No demos analyzed yet.</div>
           )}
         </div>
+        </TooltipProvider>
       </SheetContent>
     </Sheet>
   );

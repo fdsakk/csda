@@ -115,6 +115,7 @@ export type Demo = {
   /** 'analyzed' = parsed from a .dem here, 'imported' = merged from a stats export */
   origin: 'analyzed' | 'imported';
   players: number;
+  playerNames: string[] | null;
   rounds: number;
 };
 

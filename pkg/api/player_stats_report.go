@@ -164,9 +164,10 @@ type ImportedDemoReportRow struct {
 	QualityReason   string  `json:"qualityReason"`
 	// Origin is "analyzed" for demos parsed from a .dem file on this instance
 	// and "imported" for demos merged in from a stats export.
-	Origin  string `json:"origin"`
-	Players int    `json:"players"`
-	Rounds  int    `json:"rounds"`
+	Origin      string   `json:"origin"`
+	Players     int      `json:"players"`
+	PlayerNames []string `json:"playerNames"`
+	Rounds      int      `json:"rounds"`
 }
 
 type PlayerStatsReport struct {
@@ -688,15 +689,19 @@ func buildPlayerStatsReport(ctx context.Context, options PlayerStatsReportOption
 		evidenceRows.Close()
 	}
 
-	demoRows, err := db.QueryContext(ctx, `SELECT d.checksum,d.path,d.file_name,d.map_name,d.demo_date,d.tick_rate,d.build_number,d.source,d.analysis_version,d.imported_at,d.enabled,d.quality_status,d.quality_reason,d.origin,COUNT(s.steam_id),COALESCE(MAX(s.rounds),0) FROM demos d LEFT JOIN player_demo_stats s ON s.demo_id=d.id GROUP BY d.id ORDER BY d.demo_date,d.checksum`)
+	demoRows, err := db.QueryContext(ctx, `SELECT d.checksum,d.path,d.file_name,d.map_name,d.demo_date,d.tick_rate,d.build_number,d.source,d.analysis_version,d.imported_at,d.enabled,d.quality_status,d.quality_reason,d.origin,COUNT(s.steam_id),COALESCE(MAX(s.rounds),0),GROUP_CONCAT(p.latest_name,char(10)) FROM demos d LEFT JOIN player_demo_stats s ON s.demo_id=d.id LEFT JOIN players p ON p.steam_id=s.steam_id GROUP BY d.id ORDER BY d.demo_date,d.checksum`)
 	if err != nil {
 		return nil, err
 	}
 	for demoRows.Next() {
 		var d ImportedDemoReportRow
-		if err := demoRows.Scan(&d.Checksum, &d.Path, &d.FileName, &d.MapName, &d.Date, &d.TickRate, &d.BuildNumber, &d.Source, &d.AnalysisVersion, &d.ImportedAt, &d.Enabled, &d.QualityStatus, &d.QualityReason, &d.Origin, &d.Players, &d.Rounds); err != nil {
+		var names sql.NullString
+		if err := demoRows.Scan(&d.Checksum, &d.Path, &d.FileName, &d.MapName, &d.Date, &d.TickRate, &d.BuildNumber, &d.Source, &d.AnalysisVersion, &d.ImportedAt, &d.Enabled, &d.QualityStatus, &d.QualityReason, &d.Origin, &d.Players, &d.Rounds, &names); err != nil {
 			demoRows.Close()
 			return nil, err
+		}
+		if names.Valid && names.String != "" {
+			d.PlayerNames = strings.Split(names.String, "\n")
 		}
 		report.Demos = append(report.Demos, d)
 	}
