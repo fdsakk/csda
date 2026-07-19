@@ -9,9 +9,48 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 
 	"github.com/akiver/cs-demo-analyzer/pkg/api"
 )
+
+func TestStaticAssetsAndSPAFallback(t *testing.T) {
+	root := t.TempDir()
+	assets := fstest.MapFS{
+		"index.html":             {Data: []byte("<main>dashboard</main>")},
+		"assets/index-ABC123.js": {Data: []byte("window.dashboard = true")},
+	}
+	server, err := NewServer(Options{
+		DatabasePath: filepath.Join(root, "stats.db"),
+		UploadsPath:  filepath.Join(root, "uploads"),
+		Assets:       assets,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(server.Close)
+
+	for _, path := range []string{"/", "/players/76561198000000001"} {
+		response := do(server, http.MethodGet, path, nil)
+		if response.Code != http.StatusOK || response.Body.String() != "<main>dashboard</main>" {
+			t.Fatalf("%s status=%d body=%q", path, response.Code, response.Body.String())
+		}
+		if got := response.Header().Get("Cache-Control"); got != "no-cache" {
+			t.Fatalf("%s cache-control=%q", path, got)
+		}
+	}
+
+	response := do(server, http.MethodGet, "/assets/index-ABC123.js", nil)
+	if response.Code != http.StatusOK || response.Body.String() != "window.dashboard = true" {
+		t.Fatalf("asset status=%d body=%q", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("asset cache-control=%q", got)
+	}
+	if response := do(server, http.MethodGet, "/assets/missing.js", nil); response.Code != http.StatusNotFound {
+		t.Fatalf("missing asset status=%d body=%q", response.Code, response.Body.String())
+	}
+}
 
 func TestHealthAndEmptyReport(t *testing.T) {
 	root := t.TempDir()

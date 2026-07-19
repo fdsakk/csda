@@ -1,5 +1,6 @@
 .DS_store
 dist
+!web/dist/
 bin
 node_modules
 *.exe

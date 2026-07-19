@@ -55,7 +55,25 @@ Use `--config=thresholds.json` (or `csda web --suspicion-config=thresholds.json`
 
 ### Local React dashboard
 
-Build the web interface and start the local Go server:
+Windows release builds contain the React dashboard inside `csda.exe`. Double-click
+the executable (or launch it without arguments) to start the server on a free
+`127.0.0.1` port and open the default browser. The database and temporary upload
+directory are stored under `%LOCALAPPDATA%\CS Demo Analyzer`; closing the console
+window stops the application.
+
+The portable release is a standalone `csda.exe`. The installer release contains
+the same executable, installs it under Program Files, creates a Start Menu shortcut
+and an uninstaller, and optionally creates a desktop shortcut. Updating or
+uninstalling the program does not remove the database in `%LOCALAPPDATA%`.
+
+To start the embedded dashboard explicitly on any supported platform:
+
+```bash
+csda app
+```
+
+For a fixed address, custom database paths, authentication, or an external web
+build, use server mode:
 
 ```bash
 cd web
@@ -64,6 +82,9 @@ npm run build
 cd ..
 csda web --db=player-stats.db --uploads=uploads --assets=web/dist --source=valve
 ```
+
+The `--assets` option is optional. Without it, `csda web` serves the dashboard
+embedded at compile time.
 
 Open `http://127.0.0.1:8080`. Drop one or more `.dem` files into the upload area; uploads are analyzed sequentially in the background, deduplicated by checksum, and added to the same SQLite player database. Job progress is streamed over Server-Sent Events and the table refreshes automatically after each completed job; failed jobs stay listed with their error until dismissed.
 
@@ -215,7 +236,24 @@ main();
 
 #### Windows
 
-`make build-windows`
+Build the portable executable (including the production React dashboard):
+
+```bash
+make build-windows
+```
+
+The result is `bin/windows-x64/csda.exe`. To also build
+`bin/windows-x64/csda-windows-x64-setup.exe`, install Inno Setup 6 and run:
+
+```bash
+make build-windows-installer
+```
+
+Set `ISCC` when the Inno Setup compiler is not available as `iscc`, for example:
+
+```bash
+make ISCC='/c/Program Files (x86)/Inno Setup 6/ISCC.exe' build-windows-installer
+```
 
 #### macOS
 

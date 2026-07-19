@@ -5,6 +5,7 @@ GO_FLAGS += "-ldflags=-s -w -X github.com/akiver/cs-demo-analyzer/pkg/cli.Versio
 GO_FLAGS += -trimpath
 BINARY_NAME=csda
 CLI_PATH = ./cmd/cli
+ISCC ?= iscc
 
 .DEFAULT_GOAL := help
 
@@ -17,6 +18,7 @@ build-unixlike:
 	@test -n "$(GOOS)" || (echo "The environment variable GOOS must be provided" && false)
 	@test -n "$(GOARCH)" || (echo "The environment variable GOARCH must be provided" && false)
 	@test -n "$(BIN_DIR)" || (echo "The environment variable BIN_DIR must be provided" && false)
+	@mkdir -p "$(BIN_DIR)"
 	CGO_ENABLED=0 GOOS="$(GOOS)" GOARCH="$(GOARCH)" go build $(GO_FLAGS) -o "$(BIN_DIR)/$(BINARY_NAME)" $(CLI_PATH)
 	chmod +x "$(BIN_DIR)/$(BINARY_NAME)"
 
@@ -32,21 +34,34 @@ build-linux: ## Build for Linux x64
 build-linux-arm64: ## Build for Linux arm64
 	@"$(MAKE)" GOOS=linux GOARCH=arm64 BIN_DIR=bin/linux-arm64 build-unixlike
 
-build-windows: ## Build for Windows x64
+
+build-web: ## Build the production React dashboard
+	@cd web && \
+	npm ci && \
+	npm run build
+
+build-windows-binary:
+	@mkdir -p bin/windows-x64
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(GO_FLAGS) -o bin/windows-x64/$(BINARY_NAME).exe $(CLI_PATH)
+
+build-windows: build-web ## Build the portable Windows x64 application
+	@"$(MAKE)" --no-print-directory build-windows-binary
+
+build-windows-installer: build-windows ## Build the Windows installer (requires Inno Setup 6)
+	"$(ISCC)" "/DMyAppVersion=$(VERSION)" installer/windows.iss
 
 build-js: ## Build the JS bundle
 	@cd js && \
 	npm install && \
 	npm run build
 
-build-all: ## Run for all platform
+build-all: build-web ## Run for all platforms, embedding the production dashboard
 	@"$(MAKE)" --no-print-directory -j4 \
 		build-darwin \
 		build-darwin-arm64 \
 		build-linux \
 		build-linux-arm64 \
-		build-windows \
+		build-windows-binary \
 		build-js
 	@cp -r ./bin/. ./js/dist/bin
 

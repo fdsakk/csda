@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	urlpath "path"
@@ -81,8 +82,12 @@ func (uploads *uploadCollector) addDemo(name string, reader io.Reader) error {
 type Options struct {
 	DatabasePath string
 	UploadsPath  string
-	AssetsPath   string
-	Source       constants.DemoSource
+	// Assets contains the dashboard files rooted at index.html. It takes
+	// precedence over AssetsPath and is normally backed by go:embed.
+	Assets fs.FS
+	// AssetsPath is retained as an override for local UI development.
+	AssetsPath string
+	Source     constants.DemoSource
 	// Config holds the suspicion thresholds used by /api/report. Zero value
 	// falls back to api.DefaultSuspicionConfig().
 	Config api.SuspicionConfig
@@ -712,7 +717,11 @@ func (s *Server) pruneFinishedLocked() {
 }
 
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
-	if s.options.AssetsPath == "" {
+	assets := s.options.Assets
+	if assets == nil && s.options.AssetsPath != "" {
+		assets = os.DirFS(s.options.AssetsPath)
+	}
+	if assets == nil {
 		http.Error(w, "web assets are not configured", http.StatusNotFound)
 		return
 	}
@@ -720,10 +729,30 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	if requested == "." || requested == "" {
 		requested = "index.html"
 	}
-	path := filepath.Join(s.options.AssetsPath, requested)
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
-		path = filepath.Join(s.options.AssetsPath, "index.html")
+	if !fs.ValidPath(requested) {
+		http.NotFound(w, r)
+		return
 	}
-	http.ServeFile(w, r, path)
+	name := requested
+	info, err := fs.Stat(assets, name)
+	if err != nil || info.IsDir() {
+		// Asset requests should fail visibly instead of receiving HTML with a
+		// JavaScript content type. Other paths are client-side React routes.
+		if strings.HasPrefix(requested, "assets/") {
+			http.NotFound(w, r)
+			return
+		}
+		name = "index.html"
+	}
+	data, err := fs.ReadFile(assets, name)
+	if err != nil {
+		http.Error(w, "web UI is not included in this build", http.StatusNotFound)
+		return
+	}
+	if strings.HasPrefix(name, "assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
+	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(data))
 }

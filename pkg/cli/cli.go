@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/akiver/cs-demo-analyzer/pkg/api"
 	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
@@ -71,11 +72,17 @@ func (cli *cliArgs) fromArgs(args []string) error {
 var Version = "dev"
 
 func Run(args []string) int {
+	if len(args) == 0 && runtime.GOOS == "windows" {
+		return runApp(nil)
+	}
 	if len(args) > 0 && args[0] == "stats" {
 		return runStats(args[1:])
 	}
 	if len(args) > 0 && args[0] == "web" {
 		return runWeb(args[1:])
+	}
+	if len(args) > 0 && args[0] == "app" {
+		return runApp(args[1:])
 	}
 	if len(args) > 0 && args[0] == "version" {
 		fmt.Println(Version)

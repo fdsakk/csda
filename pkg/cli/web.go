@@ -15,6 +15,7 @@ import (
 	"github.com/akiver/cs-demo-analyzer/pkg/api"
 	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
 	apiweb "github.com/akiver/cs-demo-analyzer/pkg/web"
+	webassets "github.com/akiver/cs-demo-analyzer/web"
 )
 
 func runWeb(args []string) int {
@@ -22,7 +23,7 @@ func runWeb(args []string) int {
 	address := fs.String("addr", "127.0.0.1:8080", "HTTP listen address")
 	database := fs.String("db", "player-stats.db", "SQLite player statistics database path")
 	uploads := fs.String("uploads", "uploads", "Folder used to store uploaded demos")
-	assets := fs.String("assets", "web/dist", "Built React assets folder")
+	assets := fs.String("assets", "", "Built React assets folder (default: UI embedded in the executable)")
 	source := fs.String("source", "", "Force demo source (default: detect automatically)")
 	configPath := fs.String("suspicion-config", "", "Optional JSON suspicion threshold configuration")
 	if err := fs.Parse(args); err != nil {
@@ -52,7 +53,13 @@ func runWeb(args []string) int {
 		fmt.Fprintln(os.Stderr, "set both CSDA_AUTH_USER and CSDA_AUTH_PASSWORD to enable authentication, or neither")
 		return 2
 	}
-	webServer, err := apiweb.NewServer(apiweb.Options{DatabasePath: *database, UploadsPath: *uploads, AssetsPath: *assets, Source: constants.DemoSource(*source), Config: config, AuthUser: authUser, AuthPassword: authPassword})
+	options := apiweb.Options{DatabasePath: *database, UploadsPath: *uploads, Source: constants.DemoSource(*source), Config: config, AuthUser: authUser, AuthPassword: authPassword}
+	if *assets == "" {
+		options.Assets = webassets.Dist()
+	} else {
+		options.AssetsPath = *assets
+	}
+	webServer, err := apiweb.NewServer(options)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -66,6 +73,7 @@ func runWeb(args []string) int {
 		<-stopped
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		webServer.Close()
 		_ = server.Shutdown(ctx)
 	}()
 	fmt.Printf("CS Demo Analyzer UI: http://%s\n", *address)
