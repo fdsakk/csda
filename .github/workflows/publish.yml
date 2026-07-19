@@ -52,6 +52,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: false
 
       - name: Build embedded dashboard
         working-directory: web
@@ -77,7 +78,7 @@ jobs:
           cd bin/windows-x64 && zip windows-x64.zip csda.exe && cd -
 
       - name: Upload portable archives
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: portable-archives
           path: bin/**/*.zip
@@ -100,6 +101,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: false
 
       - name: Build embedded dashboard
         working-directory: web
@@ -125,7 +127,7 @@ jobs:
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=${{ needs.portable.outputs.version }}" installer/windows.iss
 
       - name: Upload installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-installer
           path: bin/windows-x64/csda-windows-x64-setup.exe
@@ -137,7 +139,7 @@ jobs:
 
     steps:
       - name: Download release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-assets
           merge-multiple: true
