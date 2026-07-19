@@ -1,5 +1,8 @@
 .DS_store
+.cache/
+.tools/
 dist
+!web/dist/
 bin
 node_modules
 *.exe
