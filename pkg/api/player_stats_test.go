@@ -700,3 +700,77 @@ func TestImportRejectsBadEnvelope(t *testing.T) {
 		t.Fatal("expected checksum error")
 	}
 }
+
+func TestFlagModeDefaultsAndValidation(t *testing.T) {
+	config := DefaultSuspicionConfig()
+	if config.FlagMode != "score" {
+		t.Fatalf("default flag mode = %q, want score", config.FlagMode)
+	}
+	config.FlagMode = "manual"
+	if err := ValidateSuspicionConfig(config); err != nil {
+		t.Fatalf("manual mode rejected: %v", err)
+	}
+	config.FlagMode = "banana"
+	if err := ValidateSuspicionConfig(config); err == nil {
+		t.Fatal("expected invalid flag mode to be rejected")
+	}
+}
+
+func TestFlagPlayerManualTiers(t *testing.T) {
+	config := DefaultSuspicionConfig()
+	config.FlagMode = "manual"
+	base := PlayerStatsReportRow{DemoCount: 3, Shots: 100, NonAWPTTDSamples: 20, NonAWPTTDWeightedMS: 500, Kills: 10, Deaths: 20, Accuracy: .15, HeadHitRate: .20}
+
+	cases := []struct {
+		name   string
+		mutate func(*PlayerStatsReportRow)
+		want   string
+	}{
+		{"clean baseline", func(*PlayerStatsReportRow) {}, "normal"},
+		{"ttd below cheater line", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 300 }, "cheater"},
+		{"ttd in watch band", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350 }, "watch"},
+		// kd 4.0 >= eliteKdCheater fires its own cheater signal; no elite-stat promotion in manual mode
+		{"ttd watch band with cheater kd", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350; r.Kills, r.Deaths = 40, 10 }, "cheater"},
+		{"insufficient ttd sample ignored", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 300; r.NonAWPTTDSamples = 5 }, "normal"},
+		{"reaction below cheater line", func(r *PlayerStatsReportRow) { r.NonAWPReactionSamples, r.NonAWPReactionWeightedMS = 20, 180 }, "cheater"},
+		{"reaction in watch band", func(r *PlayerStatsReportRow) { r.NonAWPReactionSamples, r.NonAWPReactionWeightedMS = 20, 220 }, "watch"},
+		{"awp ttd below cheater line", func(r *PlayerStatsReportRow) { r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 170 }, "cheater"},
+		{"awp ttd in watch band", func(r *PlayerStatsReportRow) { r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 200 }, "watch"},
+		{"head hit alone flags in manual mode", func(r *PlayerStatsReportRow) { r.DamageEvents, r.HeadHitRate = 40, .62 }, "cheater"},
+		{"head hit watch band", func(r *PlayerStatsReportRow) { r.DamageEvents, r.HeadHitRate = 40, .55 }, "watch"},
+		{"head hit below sample gate ignored", func(r *PlayerStatsReportRow) { r.DamageEvents, r.HeadHitRate = 20, .62 }, "normal"},
+		{"accuracy cheater", func(r *PlayerStatsReportRow) { r.Accuracy = .50 }, "cheater"},
+		{"accuracy watch", func(r *PlayerStatsReportRow) { r.Accuracy = .35 }, "watch"},
+		{"kd watch", func(r *PlayerStatsReportRow) { r.Kills, r.Deaths = 20, 10 }, "watch"},
+		{"worst tier wins", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350; r.NonAWPReactionSamples, r.NonAWPReactionWeightedMS = 20, 180 }, "cheater"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			row := base
+			tc.mutate(&row)
+			flagPlayer(&row, config)
+			if !row.Eligible {
+				t.Fatal("expected eligible")
+			}
+			if row.Status != tc.want {
+				t.Fatalf("status = %q, want %q (%+v)", row.Status, tc.want, row)
+			}
+			if row.SuspicionScore != 0 {
+				t.Fatalf("manual mode must not produce a score, got %.2f", row.SuspicionScore)
+			}
+			if row.Status != "normal" && len(row.TriggeredRules) == 0 {
+				t.Fatal("flagged row must record triggered rules")
+			}
+		})
+	}
+}
+
+func TestFlagPlayerManualRequiresMinimumSample(t *testing.T) {
+	config := DefaultSuspicionConfig()
+	config.FlagMode = "manual"
+	row := PlayerStatsReportRow{DemoCount: 2, Shots: 99, NonAWPTTDSamples: 20, NonAWPTTDWeightedMS: 300}
+	flagPlayer(&row, config)
+	if row.Eligible || row.Status != "insufficient_sample" {
+		t.Fatalf("unexpected eligibility: %+v", row)
+	}
+}

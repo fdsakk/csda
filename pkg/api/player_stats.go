@@ -61,6 +61,11 @@ type PlayerStatsBuildResult struct {
 // (watch = yellow, cheater = red). Correlated metrics are collapsed into
 // timing, precision and performance groups and fused into a 0–100 score.
 type SuspicionConfig struct {
+	// FlagMode selects how statuses are assigned: "score" fuses evidence into
+	// a 0–100 score with score-band thresholds; "manual" applies each stat's
+	// watch/cheater bound independently and the worst tier wins.
+	FlagMode string `json:"flagMode"`
+
 	MinimumDemos      int `json:"minimumDemos"`
 	MinimumShots      int `json:"minimumShots"`
 	TTDMinimumSamples int `json:"ttdMinimumSamples"`
@@ -105,6 +110,7 @@ type SuspicionConfig struct {
 
 func DefaultSuspicionConfig() SuspicionConfig {
 	return SuspicionConfig{
+		FlagMode:     "score",
 		MinimumDemos: 3, MinimumShots: 100,
 		TTDMinimumSamples:       20,
 		TTDCheaterMS:            320,
@@ -140,6 +146,9 @@ func DefaultSuspicionConfig() SuspicionConfig {
 // ValidateSuspicionConfig rejects values that would make the flagging bands
 // ambiguous or impossible to reach.
 func ValidateSuspicionConfig(config SuspicionConfig) error {
+	if config.FlagMode != "score" && config.FlagMode != "manual" {
+		return errors.New(`flag mode must be "score" or "manual"`)
+	}
 	if config.MinimumDemos < 1 || config.MinimumShots < 1 || config.TTDMinimumSamples < 1 || config.HeadHitMinimumEvents < 1 {
 		return errors.New("minimum sample counts must be at least 1")
 	}

@@ -432,6 +432,10 @@ func flagPlayer(row *PlayerStatsReportRow, config SuspicionConfig) {
 		row.Status = "insufficient_sample"
 		return
 	}
+	if config.FlagMode == "manual" {
+		flagPlayerManual(row, config)
+		return
+	}
 
 	timingSignals := make([]scoredSignal, 0, 3)
 	if row.NonAWPTTDSamples >= config.TTDMinimumSamples && row.NonAWPTTDWeightedMS > 0 {
@@ -512,6 +516,74 @@ func flagPlayer(row *PlayerStatsReportRow, config SuspicionConfig) {
 		row.TriggeredRules = append(row.TriggeredRules, PlayerSuspicionRule{
 			Name: signal.name, Value: signal.value, Sample: signal.sample, Tier: row.Status, Score: signal.evidence * 100,
 		})
+	}
+}
+
+func promote(current, next string) string {
+	rank := map[string]int{"normal": 0, "watch": 1, "cheater": 2}
+	if rank[next] > rank[current] {
+		return next
+	}
+	return current
+}
+
+// flagPlayerManual applies plain per-stat thresholds: each gated stat is
+// checked against its watch and cheater bound independently, every firing
+// signal is recorded, and the worst tier wins. No fused score is produced.
+func flagPlayerManual(row *PlayerStatsReportRow, config SuspicionConfig) {
+	row.Status = "normal"
+	signal := func(name string, value float64, sample int, tier string) {
+		row.Status = promote(row.Status, tier)
+		row.TriggeredRules = append(row.TriggeredRules, PlayerSuspicionRule{Name: name, Value: value, Sample: sample, Tier: tier})
+	}
+
+	if row.NonAWPTTDSamples >= config.TTDMinimumSamples && row.NonAWPTTDWeightedMS > 0 {
+		switch {
+		case row.NonAWPTTDWeightedMS < config.TTDCheaterMS:
+			signal("ttd", row.NonAWPTTDWeightedMS, row.NonAWPTTDSamples, "cheater")
+		case row.NonAWPTTDWeightedMS < config.TTDSuspiciousMS:
+			signal("ttd", row.NonAWPTTDWeightedMS, row.NonAWPTTDSamples, "watch")
+		}
+	}
+	if row.NonAWPReactionSamples >= config.TTDMinimumSamples && row.NonAWPReactionWeightedMS > 0 {
+		switch {
+		case row.NonAWPReactionWeightedMS < config.ReactionCheaterMS:
+			signal("reaction", row.NonAWPReactionWeightedMS, row.NonAWPReactionSamples, "cheater")
+		case row.NonAWPReactionWeightedMS < config.ReactionWatchMS:
+			signal("reaction", row.NonAWPReactionWeightedMS, row.NonAWPReactionSamples, "watch")
+		}
+	}
+	if row.AWPTTDSamples >= config.TTDMinimumSamples && row.AWPTTDWeightedMS > 0 {
+		switch {
+		case row.AWPTTDWeightedMS < config.AWPTTDCheaterMS:
+			signal("awp_ttd", row.AWPTTDWeightedMS, row.AWPTTDSamples, "cheater")
+		case row.AWPTTDWeightedMS < config.AWPTTDWatchMS:
+			signal("awp_ttd", row.AWPTTDWeightedMS, row.AWPTTDSamples, "watch")
+		}
+	}
+	if row.DamageEvents >= config.HeadHitMinimumEvents {
+		switch {
+		case row.HeadHitRate >= config.HeadHitCheaterThreshold:
+			signal("head_hit_rate", row.HeadHitRate, row.DamageEvents, "cheater")
+		case row.HeadHitRate >= config.HeadHitWatchThreshold:
+			signal("head_hit_rate", row.HeadHitRate, row.DamageEvents, "watch")
+		}
+	}
+	switch {
+	case row.Accuracy >= config.AccuracyCheater:
+		signal("accuracy", row.Accuracy, row.Shots, "cheater")
+	case row.Accuracy >= config.EliteAccuracy:
+		signal("accuracy", row.Accuracy, row.Shots, "watch")
+	}
+	kd := ratio(row.Kills, row.Deaths)
+	if row.Deaths == 0 && row.Kills > 0 {
+		kd = float64(row.Kills)
+	}
+	switch {
+	case kd >= config.EliteKDCheater:
+		signal("kd", kd, row.Kills+row.Deaths, "cheater")
+	case kd >= config.EliteKD:
+		signal("kd", kd, row.Kills+row.Deaths, "watch")
 	}
 }
 
