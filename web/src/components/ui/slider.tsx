@@ -1,36 +1,26 @@
-import * as React from "react"
-import { Slider as SliderPrimitive } from "radix-ui"
+import * as React from 'react';
+import { Slider as BaseSlider } from '@base-ui/react/slider';
 
-import { cn } from "@/lib/utils"
+import { cn } from '@/lib/utils';
 
-function Slider({
-  className,
-  ...props
-}: React.ComponentProps<typeof SliderPrimitive.Root>) {
+function Slider({ className, ...props }: BaseSlider.Root.Props<readonly number[]>) {
   return (
-    <SliderPrimitive.Root
+    <BaseSlider.Root
       data-slot="slider"
-      className={cn(
-        "relative flex w-full touch-none select-none items-center data-[disabled]:opacity-50",
-        className
-      )}
+      className={cn('relative w-full touch-none select-none data-[disabled]:opacity-50', className)}
       {...props}
     >
-      <SliderPrimitive.Track
-        data-slot="slider-track"
-        className="relative h-1.5 w-full grow overflow-hidden rounded-full bg-muted"
-      >
-        <SliderPrimitive.Range
-          data-slot="slider-range"
-          className="absolute h-full bg-primary"
-        />
-      </SliderPrimitive.Track>
-      <SliderPrimitive.Thumb
-        data-slot="slider-thumb"
-        className="block size-4 shrink-0 rounded-full border border-primary/60 bg-background shadow-sm transition-[color,box-shadow] outline-none hover:border-primary focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none"
-      />
-    </SliderPrimitive.Root>
-  )
+      <BaseSlider.Control className="flex w-full items-center py-1.5">
+        <BaseSlider.Track data-slot="slider-track" className="relative h-1.5 w-full grow rounded-full bg-muted">
+          <BaseSlider.Indicator data-slot="slider-range" className="rounded-full bg-primary" />
+          <BaseSlider.Thumb
+            data-slot="slider-thumb"
+            className="size-4 rounded-full border border-primary/60 bg-background shadow-sm outline-none transition-[color,box-shadow] hover:border-primary focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[disabled]:pointer-events-none"
+          />
+        </BaseSlider.Track>
+      </BaseSlider.Control>
+    </BaseSlider.Root>
+  );
 }
 
-export { Slider }
+export { Slider };

@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { countActiveFilters, DEFAULT_FILTERS, StatusFilter, TableFilters } from '@/lib/filters';
 import { number } from '@/lib/format';
@@ -58,7 +59,7 @@ export function FiltersPanel({ filters, onChange }: { filters: TableFilters; onC
   const set = <K extends keyof TableFilters>(key: K, value: TableFilters[K]) => onChange({ ...filters, [key]: value });
   const active = countActiveFilters(filters);
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4">
+    <Card className="gap-4 p-4">
       <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <div className="flex flex-col gap-1">
           <label className="text-xs text-muted-foreground">Status</label>
@@ -88,6 +89,6 @@ export function FiltersPanel({ filters, onChange }: { filters: TableFilters; onC
         </div>
         <Button variant="ghost" size="sm" disabled={!active} onClick={() => onChange(DEFAULT_FILTERS)}>Reset filters</Button>
       </div>
-    </div>
+    </Card>
   );
 }
