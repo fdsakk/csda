@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/akiver/cs-demo-analyzer/internal/demo"
-	"github.com/akiver/cs-demo-analyzer/internal/math"
-	"github.com/akiver/cs-demo-analyzer/internal/slice"
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
+	"github.com/fdsakk/csda/internal/demo"
+	"github.com/fdsakk/csda/internal/math"
+	"github.com/fdsakk/csda/internal/slice"
+	"github.com/fdsakk/csda/pkg/api/constants"
 	"github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/common"
 )
 

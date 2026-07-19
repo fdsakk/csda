@@ -1,13 +1,13 @@
 {
-  "name": "@akiver/cs-demo-analyzer",
+  "name": "@fdsakk/csda",
   "version": "1.10.2",
   "description": "Analyze and extract data from Counter-Strike demos.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/akiver/cs-demo-analyzer.git"
+    "url": "git+https://github.com/fdsakk/csda.git"
   },
   "bugs": {
-    "url": "https://github.com/akiver/cs-demo-analyzer/issues"
+    "url": "https://github.com/fdsakk/csda/issues"
   },
   "main": "./dist/index.js",
   "bin": {

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/akiver/cs-demo-analyzer/internal/strings"
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
+	"github.com/fdsakk/csda/internal/strings"
+	"github.com/fdsakk/csda/pkg/api/constants"
 	common "github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/common"
 	st "github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/sendtables"
 )

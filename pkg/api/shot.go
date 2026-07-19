@@ -1,7 +1,7 @@
 package api
 
 import (
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
+	"github.com/fdsakk/csda/pkg/api/constants"
 	"github.com/golang/geo/r3"
 	common "github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/common"
 	events "github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/events"

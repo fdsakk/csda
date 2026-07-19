@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	apiweb "github.com/akiver/cs-demo-analyzer/pkg/web"
-	webassets "github.com/akiver/cs-demo-analyzer/web"
+	apiweb "github.com/fdsakk/csda/pkg/web"
+	webassets "github.com/fdsakk/csda/web"
 )
 
 const appDirectoryName = "CS Demo Analyzer"

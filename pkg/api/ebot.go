@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	s "github.com/akiver/cs-demo-analyzer/internal/strings"
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
+	s "github.com/fdsakk/csda/internal/strings"
+	"github.com/fdsakk/csda/pkg/api/constants"
 	events "github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/events"
 	sendtables "github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/sendtables"
 )

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
+	"github.com/fdsakk/csda/pkg/api/constants"
 	"github.com/golang/geo/r3"
 )
 
@@ -742,7 +742,10 @@ func TestFlagPlayerManualTiers(t *testing.T) {
 		{"accuracy cheater", func(r *PlayerStatsReportRow) { r.Accuracy = .50 }, "cheater"},
 		{"accuracy watch", func(r *PlayerStatsReportRow) { r.Accuracy = .35 }, "watch"},
 		{"kd watch", func(r *PlayerStatsReportRow) { r.Kills, r.Deaths = 20, 10 }, "watch"},
-		{"worst tier wins", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350; r.NonAWPReactionSamples, r.NonAWPReactionWeightedMS = 20, 180 }, "cheater"},
+		{"worst tier wins", func(r *PlayerStatsReportRow) {
+			r.NonAWPTTDWeightedMS = 350
+			r.NonAWPReactionSamples, r.NonAWPReactionWeightedMS = 20, 180
+		}, "cheater"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

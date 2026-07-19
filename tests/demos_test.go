@@ -3,10 +3,10 @@ package tests
 import (
 	"testing"
 
-	"github.com/akiver/cs-demo-analyzer/pkg/api"
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
-	"github.com/akiver/cs-demo-analyzer/tests/assertion"
-	"github.com/akiver/cs-demo-analyzer/tests/testsutils"
+	"github.com/fdsakk/csda/pkg/api"
+	"github.com/fdsakk/csda/pkg/api/constants"
+	"github.com/fdsakk/csda/tests/assertion"
+	"github.com/fdsakk/csda/tests/testsutils"
 )
 
 // demoTestCase describes a demo to analyze and snapshot.

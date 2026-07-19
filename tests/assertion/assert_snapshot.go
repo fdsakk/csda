@@ -11,8 +11,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/akiver/cs-demo-analyzer/pkg/api"
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
+	"github.com/fdsakk/csda/pkg/api"
+	"github.com/fdsakk/csda/pkg/api/constants"
 )
 
 var update = flag.Bool("update", false, "update snapshots with the current analyzer output")

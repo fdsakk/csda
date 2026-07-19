@@ -12,10 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/akiver/cs-demo-analyzer/pkg/api"
-	"github.com/akiver/cs-demo-analyzer/pkg/api/constants"
-	apiweb "github.com/akiver/cs-demo-analyzer/pkg/web"
-	webassets "github.com/akiver/cs-demo-analyzer/web"
+	"github.com/fdsakk/csda/pkg/api"
+	"github.com/fdsakk/csda/pkg/api/constants"
+	apiweb "github.com/fdsakk/csda/pkg/web"
+	webassets "github.com/fdsakk/csda/web"
 )
 
 func runWeb(args []string) int {

@@ -1,7 +1,7 @@
 package constants
 
 import (
-	"github.com/akiver/cs-demo-analyzer/internal/converters"
+	"github.com/fdsakk/csda/internal/converters"
 )
 
 type GameType int
