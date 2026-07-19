@@ -105,6 +105,10 @@
   }
 }
 
+.player-score-row > td:first-child {
+  color: var(--score-color);
+}
+
 /* Keep the guide's scrollbar unobtrusive on both Firefox and Chromium. */
 .cheat-sheet-scroll {
   scrollbar-width: thin;

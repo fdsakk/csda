@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState, useDeferredValue } from 'react';
+import { Fragment, type CSSProperties, useEffect, useMemo, useState, useDeferredValue } from 'react';
 import { ArrowDown, ArrowUp, Ban, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ListFilter, Search } from 'lucide-react';
 import { Player, PlayerWeapon } from '@/api';
 import { Badge } from '@/components/ui/badge';
@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { PlayerDetails } from '@/components/PlayerDetails';
 import { FiltersPanel } from '@/components/PlayerFilters';
 import { countActiveFilters, DEFAULT_FILTERS, matchesFilters, TableFilters } from '@/lib/filters';
-import { ms, number, pct } from '@/lib/format';
+import { ms, number, pct, scoreColor } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 type SortKey = 'status' | 'suspicionScore' | 'name' | 'demoCount' | 'shots' | 'kills' | 'deaths' | 'accuracy' | 'headHitRate' | 'headshotKillRate' | 'nonAwpTtdWeightedMs' | 'nonAwpReactionWeightedMs';
@@ -167,7 +167,8 @@ export function PlayerTable({
               return (
                 <Fragment key={player.steamId}>
                   <TableRow
-                    className={cn('cursor-pointer', player.banned && 'bg-destructive/10 text-muted-foreground hover:bg-destructive/15')}
+                    className={cn('player-score-row cursor-pointer', player.banned && 'bg-destructive/10 text-muted-foreground hover:bg-destructive/15')}
+                    style={{ '--score-color': player.eligible ? scoreColor(player.suspicionScore) : undefined } as CSSProperties}
                     onClick={() => setExpanded((value) => (value === player.steamId ? null : player.steamId))}
                   >
                     <TableCell className="font-medium tabular-nums">{player.eligible ? Math.round(player.suspicionScore) : '—'}</TableCell>
