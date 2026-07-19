@@ -67,11 +67,13 @@ const COLUMNS: { key: SortKey | null; label: string }[] = [
 export function PlayerTable({
   players,
   weapons,
+  scoreMode,
   onToggleSaved,
   onToggleBanned,
 }: {
   players: Player[];
   weapons: PlayerWeapon[];
+  scoreMode: boolean;
   onToggleSaved: (player: Player) => void;
   onToggleBanned: (player: Player) => void;
 }) {
@@ -86,6 +88,12 @@ export function PlayerTable({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [showAll, setShowAll] = useState(false);
+
+  const columns = scoreMode ? COLUMNS : COLUMNS.filter((column) => column.key !== 'suspicionScore');
+
+  useEffect(() => {
+    if (!scoreMode && sortKey === 'suspicionScore') setSortKey('status');
+  }, [scoreMode, sortKey]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ filters, sortKey, ascending, pageSize }));
@@ -147,7 +155,7 @@ export function PlayerTable({
         <Table className="min-w-[1100px]">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              {COLUMNS.map((col) => (
+              {columns.map((col) => (
                 <TableHead key={col.label} className={cn('bg-muted/40', !col.key && 'w-[1%] px-2 text-center')}>
                   {col.key ? (
                     <button className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => sort(col.key!)}>
@@ -168,10 +176,12 @@ export function PlayerTable({
                 <Fragment key={player.steamId}>
                   <TableRow
                     className={cn('player-score-row cursor-pointer', player.banned && 'bg-destructive/10 text-muted-foreground hover:bg-destructive/15')}
-                    style={{ '--score-color': player.eligible ? scoreColor(player.suspicionScore) : undefined } as CSSProperties}
+                    style={{ '--score-color': scoreMode && player.eligible ? scoreColor(player.suspicionScore) : undefined } as CSSProperties}
                     onClick={() => setExpanded((value) => (value === player.steamId ? null : player.steamId))}
                   >
-                    <TableCell className="font-medium tabular-nums">{player.eligible ? Math.round(player.suspicionScore) : '—'}</TableCell>
+                    {scoreMode ? (
+                      <TableCell className="font-medium tabular-nums">{player.eligible ? Math.round(player.suspicionScore) : '—'}</TableCell>
+                    ) : null}
                     <TableCell>
                       <div className="flex items-center gap-1.5 font-medium">
                         {player.name}
@@ -214,8 +224,8 @@ export function PlayerTable({
                   </TableRow>
                   {open ? (
                     <TableRow className="hover:bg-transparent">
-                      <TableCell colSpan={COLUMNS.length} className="p-0">
-                        <PlayerDetails player={player} weapons={weapons.filter((weapon) => weapon.steamId === player.steamId)} />
+                      <TableCell colSpan={columns.length} className="p-0">
+                        <PlayerDetails player={player} weapons={weapons.filter((weapon) => weapon.steamId === player.steamId)} scoreMode={scoreMode} />
                       </TableCell>
                     </TableRow>
                   ) : null}

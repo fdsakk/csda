@@ -89,9 +89,15 @@ const RULE_LABEL: Record<string, string> = {
   head_hit_score: 'Head-hit evidence',
   accuracy_score: 'Accuracy evidence',
   kd_score: 'K/D support',
+  ttd: 'Rifle TTD',
+  awp_ttd: 'AWP TTD',
+  reaction: 'Rifle reaction',
+  head_hit_rate: 'Head-hit rate',
+  accuracy: 'Accuracy',
+  kd: 'K/D',
 };
 
-export function PlayerDetails({ player, weapons }: { player: Player; weapons: PlayerWeapon[] }) {
+export function PlayerDetails({ player, weapons, scoreMode }: { player: Player; weapons: PlayerWeapon[]; scoreMode: boolean }) {
   const rules = player.triggeredRules ?? [];
   const flagSignals = rules.filter((rule) => rule.tier === 'watch' || rule.tier === 'cheater');
   const accuracyWeapons = weapons
@@ -108,8 +114,12 @@ export function PlayerDetails({ player, weapons }: { player: Player; weapons: Pl
     { label: 'Airborne', shots: player.airborneShots, rate: player.airborneHitRate },
   ].filter((row) => row.shots > 0);
   const stats: [string, string][] = [
-    ['Review score', player.eligible ? `${Math.round(player.suspicionScore)} / 100` : 'low sample'],
-    ['Evidence groups', `T ${Math.round(player.timingScore)} · P ${Math.round(player.precisionScore)} · K/D ${Math.round(player.performanceScore)}`],
+    ...(scoreMode
+      ? ([
+          ['Review score', player.eligible ? `${Math.round(player.suspicionScore)} / 100` : 'low sample'],
+          ['Evidence groups', `T ${Math.round(player.timingScore)} · P ${Math.round(player.precisionScore)} · K/D ${Math.round(player.performanceScore)}`],
+        ] as [string, string][])
+      : []),
     ['Crosshair @ exposure', `${player.crosshairMedianAngle.toFixed(1)}°`],
     ['First shot error', `${player.firstShotMedianAngle.toFixed(1)}°`],
     ['Unspotted damage', pct(player.unspottedDamageRate)],
@@ -226,7 +236,7 @@ export function PlayerDetails({ player, weapons }: { player: Player; weapons: Pl
               {flagSignals.map((rule) => (
                 <span
                   key={rule.name}
-                  title={`${Math.round(rule.score)} evidence · n=${number.format(rule.sample)}`}
+                  title={rule.score ? `${Math.round(rule.score)} evidence · n=${number.format(rule.sample)}` : `n=${number.format(rule.sample)}`}
                   className={cn(
                     'flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs',
                     rule.tier === 'cheater'

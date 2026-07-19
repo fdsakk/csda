@@ -1,6 +1,7 @@
 export type Rule = { name: string; value: number; sample: number; tier: 'watch' | 'cheater'; score: number };
 
 export type SuspicionConfig = {
+  flagMode: 'score' | 'manual';
   minimumDemos: number;
   minimumShots: number;
   ttdMinimumSamples: number;

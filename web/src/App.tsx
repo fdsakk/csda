@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BookOpen } from 'lucide-react';
-import { deleteJob, getJobs, getReport, Job, Player, Report, setPlayerBanned, setPlayerSaved } from './api';
+import { deleteJob, getJobs, getReport, getThresholds, Job, Player, Report, setPlayerBanned, setPlayerSaved } from './api';
 import { Button } from '@/components/ui/button';
 import { CheatSheet } from '@/components/CheatSheet';
 import { DemosDialog } from '@/components/DemosDialog';
@@ -21,12 +21,13 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [guideOpen, setGuideOpen] = useState(false);
+  const [scoreMode, setScoreMode] = useState(true);
   const completedRef = useRef('');
 
   const loadAll = useCallback(async () => {
     try {
-      const [nextReport, nextJobs] = await Promise.all([getReport(), getJobs()]);
-      setReport(nextReport); setJobs(nextJobs); setError('');
+      const [nextReport, nextJobs, thresholds] = await Promise.all([getReport(), getJobs(), getThresholds()]);
+      setReport(nextReport); setJobs(nextJobs); setScoreMode(thresholds.current.flagMode !== 'manual'); setError('');
       completedRef.current = finishedSignature(nextJobs);
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to load data'); }
@@ -96,6 +97,7 @@ export default function App() {
         <PlayerTable
           players={report.players ?? []}
           weapons={report.playersByWeapon ?? []}
+          scoreMode={scoreMode}
           onToggleSaved={(player) => void toggleSaved(player)}
           onToggleBanned={(player) => void toggleBanned(player)}
         />
