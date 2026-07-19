@@ -1,4 +1,4 @@
-import { Fragment, type CSSProperties, useEffect, useMemo, useState, useDeferredValue } from 'react';
+import { Fragment, type CSSProperties, useEffect, useMemo, useState, useDeferredValue, useTransition } from 'react';
 import { ArrowDown, ArrowUp, Ban, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ListFilter, Search } from 'lucide-react';
 import { Player, PlayerWeapon } from '@/api';
 import { Badge } from '@/components/ui/badge';
@@ -48,20 +48,20 @@ function loadStoredState(): StoredTableState {
   }
 }
 
-const COLUMNS: { key: SortKey | null; label: string }[] = [
-  { key: 'suspicionScore', label: 'Score' },
-  { key: 'name', label: 'Player' },
-  { key: 'demoCount', label: 'Demos' },
-  { key: 'shots', label: 'Shots' },
-  { key: 'kills', label: 'Kills' },
-  { key: 'deaths', label: 'Deaths' },
-  { key: 'accuracy', label: 'Accuracy' },
-  { key: 'headHitRate', label: 'Head hit' },
-  { key: 'headshotKillRate', label: 'HS kills' },
-  { key: 'nonAwpTtdWeightedMs', label: 'TTD' },
-  { key: 'nonAwpReactionWeightedMs', label: 'Reaction' },
-  { key: 'status', label: 'Status' },
-  { key: null, label: 'Actions' },
+const COLUMNS: { key: SortKey | null; label: string; width: number }[] = [
+  { key: 'suspicionScore', label: 'Score', width: 70 },
+  { key: 'name', label: 'Player', width: 210 },
+  { key: 'demoCount', label: 'Demos', width: 65 },
+  { key: 'shots', label: 'Shots', width: 80 },
+  { key: 'kills', label: 'Kills', width: 70 },
+  { key: 'deaths', label: 'Deaths', width: 75 },
+  { key: 'accuracy', label: 'Accuracy', width: 90 },
+  { key: 'headHitRate', label: 'Head hit', width: 90 },
+  { key: 'headshotKillRate', label: 'HS kills', width: 90 },
+  { key: 'nonAwpTtdWeightedMs', label: 'TTD', width: 80 },
+  { key: 'nonAwpReactionWeightedMs', label: 'Reaction', width: 90 },
+  { key: 'status', label: 'Status', width: 95 },
+  { key: null, label: 'Actions', width: 70 },
 ];
 
 export function PlayerTable({
@@ -86,9 +86,19 @@ export function PlayerTable({
   const [sortKey, setSortKey] = useState<SortKey>(stored.sortKey ?? 'status');
   const [ascending, setAscending] = useState(stored.ascending ?? false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [, startExpansionTransition] = useTransition();
   const [page, setPage] = useState(0);
 
   const columns = scoreMode ? COLUMNS : COLUMNS.filter((column) => column.key !== 'suspicionScore');
+  const weaponsByPlayer = useMemo(() => {
+    const index = new Map<string, PlayerWeapon[]>();
+    for (const weapon of weapons) {
+      const playerWeapons = index.get(weapon.steamId);
+      if (playerWeapons) playerWeapons.push(weapon);
+      else index.set(weapon.steamId, [weapon]);
+    }
+    return index;
+  }, [weapons]);
 
   useEffect(() => {
     if (!scoreMode && sortKey === 'suspicionScore') setSortKey('status');
@@ -152,7 +162,10 @@ export function PlayerTable({
       {filtersOpen ? <FiltersPanel filters={filters} onChange={setFilters} /> : null}
 
       <div className="overflow-x-auto rounded-lg border border-border">
-        <Table className="min-w-[1100px]">
+        <Table className="min-w-[1185px] table-fixed">
+          <colgroup>
+            {columns.map((column) => <col key={column.label} style={{ width: column.width }} />)}
+          </colgroup>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               {columns.map((col) => (
@@ -177,7 +190,9 @@ export function PlayerTable({
                   <TableRow
                     className={cn('player-score-row cursor-pointer', player.banned && 'bg-destructive/10 text-muted-foreground hover:bg-destructive/15')}
                     style={{ '--score-color': scoreMode && player.eligible ? scoreColor(player.suspicionScore) : undefined } as CSSProperties}
-                    onClick={() => setExpanded((value) => (value === player.steamId ? null : player.steamId))}
+                    onClick={() => startExpansionTransition(() => {
+                      setExpanded((value) => (value === player.steamId ? null : player.steamId));
+                    })}
                   >
                     {scoreMode ? (
                       <TableCell className="font-medium tabular-nums">{player.eligible ? Math.round(player.suspicionScore) : '—'}</TableCell>
@@ -225,7 +240,7 @@ export function PlayerTable({
                   {open ? (
                     <TableRow className="hover:bg-transparent">
                       <TableCell colSpan={columns.length} className="p-0">
-                        <PlayerDetails player={player} weapons={weapons.filter((weapon) => weapon.steamId === player.steamId)} scoreMode={scoreMode} />
+                        <PlayerDetails player={player} weapons={weaponsByPlayer.get(player.steamId) ?? []} scoreMode={scoreMode} />
                       </TableCell>
                     </TableRow>
                   ) : null}
