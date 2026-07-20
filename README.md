@@ -184,7 +184,9 @@ exposing it outside a trusted network.
 
 ## CLI and API reference
 
-Ready-to-use binaries are available on the [releases page](https://github.com/fdsakk/csda/releases).
+Ready-to-use Windows binaries are available on the
+[releases page](https://github.com/fdsakk/csda/releases). On Linux and macOS,
+use Docker or build the application from source.
 
 ### Command-line usage
 
