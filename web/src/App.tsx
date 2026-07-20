@@ -6,8 +6,10 @@ import { CheatSheet } from '@/components/CheatSheet';
 import { DemosDialog } from '@/components/DemosDialog';
 import { Dropzone } from '@/components/Dropzone';
 import { JobsList } from '@/components/JobsList';
+import { LanguageToggle } from '@/components/LanguageToggle';
 import { PlayerTable } from '@/components/PlayerTable';
 import { ThresholdsDialog } from '@/components/ThresholdsDialog';
+import { useT } from '@/lib/i18n';
 
 const EMPTY_REPORT: Report = { players: [], playersByWeapon: [], importedDemos: [] };
 
@@ -16,6 +18,7 @@ function finishedSignature(jobs: Job[]) {
 }
 
 export default function App() {
+  const t = useT();
   const [report, setReport] = useState<Report>(EMPTY_REPORT);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,10 +80,11 @@ export default function App() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">CS2 demo analysis</h1>
-          <p className="text-sm text-muted-foreground">Upload demos to build the player baseline and review flagged accounts.</p>
+          <p className="text-sm text-muted-foreground">{t('Upload demos to build the player baseline and review flagged accounts.', 'Wgraj dema, aby zbudować bazę graczy i przejrzeć oznaczone konta.')}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setGuideOpen(true)}><BookOpen className="size-4" /> Cheat sheet</Button>
+          <LanguageToggle />
+          <Button variant="outline" size="sm" onClick={() => setGuideOpen(true)}><BookOpen className="size-4" /> {t('Cheat sheet', 'Cheat sheet')}</Button>
           {!loading ? <ThresholdsDialog onChanged={() => void loadAll()} /> : null}
           {!loading ? <DemosDialog demos={report.importedDemos ?? []} onChanged={() => void loadAll()} /> : null}
         </div>

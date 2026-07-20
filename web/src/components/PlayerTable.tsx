@@ -10,6 +10,7 @@ import { PlayerDetails } from '@/components/PlayerDetails';
 import { FiltersPanel } from '@/components/PlayerFilters';
 import { countActiveFilters, DEFAULT_FILTERS, matchesFilters, TableFilters } from '@/lib/filters';
 import { ms, number, pct, scoreColor } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 type SortKey = 'status' | 'suspicionScore' | 'name' | 'demoCount' | 'shots' | 'kills' | 'deaths' | 'accuracy' | 'headHitRate' | 'headshotKillRate' | 'nonAwpTtdWeightedMs' | 'nonAwpReactionWeightedMs';
@@ -77,6 +78,7 @@ export function PlayerTable({
   onToggleSaved: (player: Player) => void;
   onToggleBanned: (player: Player) => void;
 }) {
+  const t = useT();
   const [stored] = useState(loadStoredState);
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
@@ -201,7 +203,7 @@ export function PlayerTable({
                       <div className="flex items-center gap-1.5 font-medium">
                         <span className="max-w-56 truncate" title={player.name}>{player.name}</span>
                         {player.isAwper ? (
-                          <Badge variant="outline" title={`${player.awpKills} AWP kills (${pct(player.awpKillRate)} of all kills)`}>AWPer</Badge>
+                          <Badge variant="outline" title={t(`${player.awpKills} AWP kills (${pct(player.awpKillRate)} of all kills)`, `${player.awpKills} zabójstw z AWP (${pct(player.awpKillRate)} wszystkich zabójstw)`)}>AWPer</Badge>
                         ) : null}
                         <ChevronDown className={cn('size-3.5 text-muted-foreground transition-transform', open && 'rotate-180')} />
                       </div>
@@ -222,14 +224,14 @@ export function PlayerTable({
                       <div className="flex items-center justify-center gap-1">
                         <button
                           className={cn('text-muted-foreground hover:text-foreground', player.saved && 'text-primary hover:text-primary')}
-                          title={player.saved ? 'Unsave player' : 'Save player'}
+                          title={player.saved ? t('Unsave player', 'Usuń z zapisanych') : t('Save player', 'Zapisz gracza')}
                           onClick={(event) => { event.stopPropagation(); onToggleSaved(player); }}
                         >
                           <Bookmark className={cn('size-4', player.saved && 'fill-current')} />
                         </button>
                         <button
                           className={cn('text-muted-foreground hover:text-destructive', player.banned && 'text-destructive')}
-                          title={player.banned ? 'Unmark as banned' : 'Mark as banned'}
+                          title={player.banned ? t('Unmark as banned', 'Cofnij oznaczenie jako zbanowany') : t('Mark as banned', 'Oznacz jako zbanowany')}
                           onClick={(event) => { event.stopPropagation(); onToggleBanned(player); }}
                         >
                           <Ban className="size-4" />

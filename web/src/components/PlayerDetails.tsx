@@ -3,15 +3,18 @@ import { Player, PlayerWeapon } from '@/api';
 import { Card } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ms, number, pct } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 const HIST_BIN_MS = 50;
 
-function InfoTip({ text, label = 'More info' }: { text: string; label?: string }) {
+function InfoTip({ text, label }: { text: string; label?: string }) {
+  const t = useT();
+  const resolvedLabel = label ?? t('More info', 'Więcej informacji');
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button type="button" aria-label={label} className="text-muted-foreground transition-colors hover:text-foreground">
+        <button type="button" aria-label={resolvedLabel} className="text-muted-foreground transition-colors hover:text-foreground">
           <Info className="size-3.5" />
         </button>
       </TooltipTrigger>
@@ -118,6 +121,7 @@ const RULE_LABEL: Record<string, string> = {
 };
 
 export function PlayerDetails({ player, weapons, scoreMode }: { player: Player; weapons: PlayerWeapon[]; scoreMode: boolean }) {
+  const t = useT();
   const rules = player.triggeredRules ?? [];
   const flagSignals = rules.filter((rule) => rule.tier === 'watch' || rule.tier === 'cheater');
   const accuracyWeapons = weapons
@@ -163,7 +167,7 @@ export function PlayerDetails({ player, weapons, scoreMode }: { player: Player; 
           p10Ms={player.ttdP10Ms}
           color="var(--chart-1)"
           className="lg:col-start-1 lg:row-start-1"
-          help="The solid line marks the median time. The brighter dashed line marks p10: the threshold reached by the fastest 10% of encounters."
+          help={t('The solid line marks the median time. The brighter dashed line marks p10: the threshold reached by the fastest 10% of encounters.', 'Ciągła linia oznacza medianę czasu. Jaśniejsza przerywana linia oznacza p10: próg osiągany przez najszybsze 10% starć.')}
         />
         <Histogram
           title="Reaction time (first shot)"
@@ -173,7 +177,7 @@ export function PlayerDetails({ player, weapons, scoreMode }: { player: Player; 
           p10Ms={player.reactionP10Ms}
           color="var(--chart-2)"
           className="lg:col-start-2 lg:row-start-1"
-          help="The solid line marks the median reaction time. The brighter dashed line marks p10: the threshold reached by the fastest 10% of reactions."
+          help={t('The solid line marks the median reaction time. The brighter dashed line marks p10: the threshold reached by the fastest 10% of reactions.', 'Ciągła linia oznacza medianę czasu reakcji. Jaśniejsza przerywana linia oznacza p10: próg osiągany przez najszybsze 10% reakcji.')}
         />
         <Card className="space-y-2 p-3 lg:col-start-1 lg:row-start-2">
           <span className="mb-3 block text-sm font-semibold text-muted-foreground">Kills by weapon</span>
@@ -197,7 +201,7 @@ export function PlayerDetails({ player, weapons, scoreMode }: { player: Player; 
         <Card className="space-y-2 p-3 lg:col-start-2 lg:row-start-2">
           <span className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
             Accuracy
-            <InfoTip text={`The vertical marker on every bar shows the player's overall accuracy (${pct(player.accuracy)}).`} label="About accuracy markers" />
+            <InfoTip text={t(`The vertical marker on every bar shows the player's overall accuracy (${pct(player.accuracy)}).`, `Pionowy znacznik na każdym pasku pokazuje ogólne accuracy gracza (${pct(player.accuracy)}).`)} label="About accuracy markers" />
           </span>
           {accuracyWeapons.length ? (
             <div className="space-y-1.5">

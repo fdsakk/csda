@@ -41,7 +41,7 @@ export function JobsList({ jobs, onDismiss }: { jobs: Job[]; onDismiss: (job: Jo
           <Card
             key={job.id}
             className={cn(
-              'flex items-start justify-between gap-3 p-4',
+              'flex-row items-start justify-between gap-3 p-4',
               failed && 'border-destructive/40 bg-destructive/5'
             )}
           >
@@ -52,7 +52,7 @@ export function JobsList({ jobs, onDismiss }: { jobs: Job[]; onDismiss: (job: Jo
                 ) : (
                   <CheckCircle2 className="size-4 shrink-0 text-primary" />
                 )}
-                <span className="truncate font-medium">{job.files.join(', ')}</span>
+                <span className="min-w-0 flex-1 truncate font-medium">{job.files.join(', ')}</span>
               </div>
               {result ? (
                 <p className="text-muted-foreground">

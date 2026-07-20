@@ -6,13 +6,15 @@ import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
-const QUALITY_REASON_LABEL: Record<string, string> = {
-  systemic_low_timing: 'Systemically low TTD and reaction across players',
-};
-
 export function DemosDialog({ demos, onChanged }: { demos: Demo[]; onChanged: () => void }) {
+  const t = useT();
+  const qualityReasonLabel = (reason: string) =>
+    reason === 'systemic_low_timing'
+      ? t('Systemically low TTD and reaction across players', 'Systematycznie niskie TTD i reakcja u wielu graczy')
+      : reason;
   const fileInput = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [message, setMessage] = useState('');
@@ -181,7 +183,7 @@ export function DemosDialog({ demos, onChanged }: { demos: Demo[]; onChanged: ()
                                   <Badge
                                     variant="warning"
                                     className="gap-1 whitespace-nowrap"
-                                    title={QUALITY_REASON_LABEL[demo.qualityReason] ?? demo.qualityReason}
+                                    title={qualityReasonLabel(demo.qualityReason)}
                                   >
                                     <ShieldAlert className="size-3" /> Warning
                                   </Badge>
