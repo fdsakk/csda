@@ -2,7 +2,7 @@
 
 # 1. Build the web UI (Vite + React) -> static assets in /web/dist.
 # Pin Bun so different machines never rewrite the lockfile format.
-FROM oven/bun:1.3.0 AS web
+FROM oven/bun:1.3.14 AS web
 WORKDIR /web
 COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile

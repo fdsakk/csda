@@ -97,6 +97,44 @@ func TestValidateSuspicionConfig(t *testing.T) {
 	}
 }
 
+func TestSampleConfidenceGrowsConservatively(t *testing.T) {
+	config := DefaultSuspicionConfig()
+	cases := []struct {
+		name    string
+		sample  int
+		minimum float64
+		maximum float64
+	}{
+		{"timing minimum", config.TTDMinimumSamples, .40, .45},
+		{"medium aggregate", 96, .60, .70},
+		{"large aggregate", 300, .80, .85},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sampleConfidence(tc.sample, config)
+			if got < tc.minimum || got >= tc.maximum {
+				t.Fatalf("confidence(%d) = %.3f, want [%.2f, %.2f)", tc.sample, got, tc.minimum, tc.maximum)
+			}
+		})
+	}
+}
+
+func TestMigrateSuspicionConfigUpdatesOnlyLegacyConfidenceDefaults(t *testing.T) {
+	legacy := DefaultSuspicionConfig()
+	legacy.SampleConfidenceFloor = .75
+	legacy.SampleConfidenceK = 30
+	migrated := migrateSuspicionConfig(legacy)
+	if migrated.SampleConfidenceFloor != .30 || migrated.SampleConfidenceK != 100 {
+		t.Fatalf("legacy confidence defaults were not migrated: %+v", migrated)
+	}
+
+	custom := legacy
+	custom.SampleConfidenceFloor = .60
+	if got := migrateSuspicionConfig(custom); got != custom {
+		t.Fatalf("custom confidence calibration changed: got %+v, want %+v", got, custom)
+	}
+}
+
 func TestFlagPlayerTiers(t *testing.T) {
 	config := DefaultSuspicionConfig()
 	base := PlayerStatsReportRow{DemoCount: 3, Shots: 100, NonAWPTTDSamples: 20, Kills: 10, Deaths: 20, Accuracy: .15, HeadHitRate: .20}
@@ -106,27 +144,27 @@ func TestFlagPlayerTiers(t *testing.T) {
 		mutate func(*PlayerStatsReportRow)
 		want   string
 	}{
-		{"non-awp ttd below cheater line", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 300 }, "cheater"},
-		{"non-awp ttd suspicious with mediocre stats", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350 }, "watch"},
-		{"non-awp ttd suspicious with elite kd stays watch", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350; r.Kills, r.Deaths = 20, 10 }, "watch"},
-		{"non-awp ttd suspicious with elite head accuracy stays watch", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350; r.DamageEvents, r.HeadHitRate = 30, .42 }, "watch"},
+		{"non-awp ttd below cheater line at minimum sample stays review-only", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 300 }, "watch"},
+		{"non-awp ttd suspicious with mediocre stats", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350 }, "normal"},
+		{"non-awp ttd suspicious with elite kd stays normal at minimum sample", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350; r.Kills, r.Deaths = 20, 10 }, "normal"},
+		{"non-awp ttd suspicious with elite head accuracy stays normal at minimum sample", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350; r.DamageEvents, r.HeadHitRate = 30, .42 }, "normal"},
 		{"non-awp ttd above suspicious band is normal", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 360 }, "normal"},
 		{"healthy non-awp ttd", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500 }, "normal"},
 		{"non-awp reaction below human floor", func(r *PlayerStatsReportRow) {
 			r.NonAWPTTDWeightedMS = 500
 			r.NonAWPReactionSamples, r.NonAWPReactionWeightedMS = 20, 180
-		}, "cheater"},
+		}, "watch"},
 		{"head hit rate alone stays normal", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.DamageEvents, r.HeadHitRate = 40, .62 }, "normal"},
 		{"insufficient non-awp ttd sample stays normal", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 300; r.NonAWPTTDSamples = 5 }, "normal"},
-		// AWP tier is independent of the rifle: clean rifle, fast AWP → flagged.
-		{"awp ttd at cheater anchor", func(r *PlayerStatsReportRow) {
+		// AWP evidence is independent of rifle timing, but still sample-weighted.
+		{"awp ttd at cheater anchor with minimum sample enters watch", func(r *PlayerStatsReportRow) {
 			r.NonAWPTTDWeightedMS = 500
 			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 180
-		}, "cheater"},
+		}, "watch"},
 		{"awp ttd watch band", func(r *PlayerStatsReportRow) {
 			r.NonAWPTTDWeightedMS = 500
 			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 190
-		}, "watch"},
+		}, "normal"},
 		{"plausible skilled awp timing stays normal", func(r *PlayerStatsReportRow) {
 			r.NonAWPTTDWeightedMS = 500
 			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 200
@@ -139,7 +177,7 @@ func TestFlagPlayerTiers(t *testing.T) {
 			r.IsAWPer = false
 			r.NonAWPTTDWeightedMS = 500
 			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 180
-		}, "cheater"},
+		}, "watch"},
 		{"insufficient awp sample stays normal", func(r *PlayerStatsReportRow) {
 			r.NonAWPTTDWeightedMS = 500
 			r.AWPTTDSamples, r.AWPTTDWeightedMS = 5, 200
@@ -176,14 +214,28 @@ func TestSuspicionScoreCalibration(t *testing.T) {
 		max    float64
 	}{
 		{"healthy aggregate", func(*PlayerStatsReportRow) {}, "normal", 0, config.ScoreWatchThreshold},
-		{"borderline rifle timing", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350 }, "watch", config.ScoreWatchThreshold, config.ScoreCheaterThreshold},
-		{"impossible rifle timing", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 300 }, "cheater", 85, 101},
-		{"timing and accuracy remain review-only", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS, r.Accuracy = 350, .30 }, "watch", config.ScoreWatchThreshold, config.ScoreCheaterThreshold},
-		{"impossible reaction", func(r *PlayerStatsReportRow) { r.NonAWPReactionSamples, r.NonAWPReactionWeightedMS = 20, 180 }, "cheater", 85, 101},
+		{"borderline rifle timing at minimum sample", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 350 }, "normal", 0, config.ScoreWatchThreshold},
+		{"impossible rifle timing at minimum sample", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 300 }, "watch", config.ScoreWatchThreshold, config.ScoreCheaterThreshold},
+		{"timing and accuracy remain normal at minimum sample", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS, r.Accuracy = 350, .30 }, "normal", 0, config.ScoreWatchThreshold},
+		{"impossible reaction at minimum sample", func(r *PlayerStatsReportRow) { r.NonAWPReactionSamples, r.NonAWPReactionWeightedMS = 20, 180 }, "watch", config.ScoreWatchThreshold, config.ScoreCheaterThreshold},
+		{"screenshot-like low precision medium sample", func(r *PlayerStatsReportRow) {
+			r.DemoCount, r.Shots, r.Kills, r.Deaths = 6, 3415, 96, 58
+			r.NonAWPTTDSamples, r.NonAWPTTDWeightedMS = 96, 314
+			r.NonAWPReactionSamples, r.NonAWPReactionWeightedMS = 96, 233
+			r.Accuracy, r.DamageEvents, r.HeadHitRate = .09, 96, .123
+		}, "watch", config.ScoreWatchThreshold, config.ScoreCheaterThreshold},
+		{"medium sample with sustained precision corroboration", func(r *PlayerStatsReportRow) {
+			r.DemoCount, r.Shots = 6, 3415
+			r.NonAWPTTDSamples, r.NonAWPTTDWeightedMS = 96, 314
+			r.Accuracy, r.DamageEvents, r.HeadHitRate = .50, 300, .60
+		}, "cheater", config.ScoreCheaterThreshold, 101},
+		{"large timing sample remains distinctive without precision", func(r *PlayerStatsReportRow) {
+			r.NonAWPTTDSamples, r.NonAWPTTDWeightedMS = 300, 314
+		}, "cheater", config.ScoreCheaterThreshold, 101},
 		{"extreme head-hit rate cannot flag alone", func(r *PlayerStatsReportRow) { r.HeadHitRate = .62 }, "normal", 0, config.ScoreWatchThreshold},
 		{"K/D cannot flag alone", func(r *PlayerStatsReportRow) { r.Kills, r.Deaths = 40, 10 }, "normal", 0, config.ScoreWatchThreshold},
 		{"plausible skilled AWP timing", func(r *PlayerStatsReportRow) { r.AWPTTDSamples, r.AWPTTDWeightedMS = 100, 200 }, "normal", 0, config.ScoreWatchThreshold},
-		{"AWP cheater anchor", func(r *PlayerStatsReportRow) { r.AWPTTDSamples, r.AWPTTDWeightedMS = 100, 180 }, "cheater", config.ScoreCheaterThreshold, 101},
+		{"AWP cheater anchor at medium sample", func(r *PlayerStatsReportRow) { r.AWPTTDSamples, r.AWPTTDWeightedMS = 100, 180 }, "watch", config.ScoreWatchThreshold, config.ScoreCheaterThreshold},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -198,6 +250,26 @@ func TestSuspicionScoreCalibration(t *testing.T) {
 				t.Fatalf("score=%.2f, want [%.2f, %.2f)", row.SuspicionScore, tc.min, tc.max)
 			}
 		})
+	}
+}
+
+func TestExtremeTimingOutranksLargerModerateSamples(t *testing.T) {
+	config := DefaultSuspicionConfig()
+	config.EliteKD = 2
+	config.ScoreCheaterThreshold = 80
+	players := []PlayerStatsReportRow{
+		{Name: "gigi", DemoCount: 5, Shots: 1535, Kills: 106, Deaths: 56, Accuracy: .199, DamageEvents: 308, HeadHitRate: .198, NonAWPTTDSamples: 121, NonAWPTTDWeightedMS: 315.625, NonAWPReactionSamples: 127, NonAWPReactionWeightedMS: 262.326},
+		{Name: "bertas", DemoCount: 6, Shots: 3415, Kills: 96, Deaths: 58, Accuracy: .09, DamageEvents: 308, HeadHitRate: .123, NonAWPTTDSamples: 98, NonAWPTTDWeightedMS: 313.763, NonAWPReactionSamples: 101, NonAWPReactionWeightedMS: 233.270},
+		{Name: "Kocik Samolocik", DemoCount: 3, Shots: 584, Kills: 41, Deaths: 19, Accuracy: .185, DamageEvents: 110, HeadHitRate: .227, NonAWPTTDSamples: 43, NonAWPTTDWeightedMS: 231.571, NonAWPReactionSamples: 45, NonAWPReactionWeightedMS: 198.317},
+	}
+	for index := range players {
+		flagPlayer(&players[index], config)
+	}
+	if players[2].SuspicionScore <= players[0].SuspicionScore || players[2].SuspicionScore <= players[1].SuspicionScore {
+		t.Fatalf("extreme timing did not rank first: gigi=%.2f bertas=%.2f kocik=%.2f", players[0].SuspicionScore, players[1].SuspicionScore, players[2].SuspicionScore)
+	}
+	if players[0].Status != "watch" || players[1].Status != "watch" || players[2].Status != "cheater" {
+		t.Fatalf("unexpected tiers: gigi=%s bertas=%s kocik=%s", players[0].Status, players[1].Status, players[2].Status)
 	}
 }
 

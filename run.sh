@@ -12,14 +12,23 @@ if [ -f .env ]; then
   set +a
 fi
 
-# Bun is the repository's only frontend package manager. Keep its version in
-# sync with web/package.json and the Docker/CI configuration.
+# Bun is the repository's only frontend package manager.
+minimum_bun_version="1.3.0"
 if ! command -v bun >/dev/null 2>&1; then
-  echo "error: Bun 1.3.0 is required to build the web UI" >&2
+  echo "error: Bun ${minimum_bun_version} or newer is required to build the web UI" >&2
   exit 1
 fi
-if [ "$(bun --version)" != "1.3.0" ]; then
-  echo "error: Bun 1.3.0 is required (found $(bun --version))" >&2
+
+bun_version="$(bun --version)"
+if [[ ! "$bun_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+  echo "error: unable to parse Bun version '$bun_version'" >&2
+  exit 1
+fi
+
+bun_major=$((10#${BASH_REMATCH[1]}))
+bun_minor=$((10#${BASH_REMATCH[2]}))
+if ((bun_major < 1 || (bun_major == 1 && bun_minor < 3))); then
+  echo "error: Bun ${minimum_bun_version} or newer is required (found ${bun_version})" >&2
   exit 1
 fi
 
