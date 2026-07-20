@@ -65,7 +65,7 @@ Requirements:
 
 - Git
 - Go 1.23 or newer
-- Bun 1.3.0
+- Bun 1.3.0 or newer
 - Port `8080` available locally
 
 Steps:
