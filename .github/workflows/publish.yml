@@ -43,62 +43,6 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
-  portable:
-    needs: validate
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.14
-
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
-
-      - name: Download and verify map geometry
-        run: |
-          python -m pip install --disable-pip-version-check awpy==2.0.2
-          awpy get tris
-          for map in de_mirage de_dust2 de_nuke de_ancient de_anubis; do
-            test -s "$HOME/.awpy/tris/$map.tri"
-          done
-
-      - name: Build embedded dashboard
-        working-directory: web
-        run: |
-          bun install --frozen-lockfile
-          bun run build
-
-      - name: Build portable binaries
-        run: |
-          make VERSION='${{ needs.validate.outputs.version }}' \
-            build-darwin \
-            build-darwin-arm64 \
-            build-linux \
-            build-linux-arm64 \
-            build-windows-binary
-
-      - name: Generate portable archives
-        run: |
-          for dir in darwin-x64 darwin-arm64 linux-x64 linux-arm64 windows-x64; do
-            cp -R "$HOME/.awpy/tris" "bin/$dir/tris"
-            (cd "bin/$dir" && zip -r "$dir.zip" csda* tris)
-          done
-
-      - name: Upload portable archives
-        uses: actions/upload-artifact@v7
-        with:
-          name: portable-archives
-          path: bin/**/*.zip
-          if-no-files-found: error
-
   windows-installer:
     needs: validate
     runs-on: windows-latest
@@ -148,6 +92,11 @@ jobs:
           $env:GOARCH = "amd64"
           go build -trimpath "-ldflags=-s -w -X github.com/fdsakk/csda/pkg/cli.Version=${{ needs.validate.outputs.version }}" -o bin/windows-x64/csda.exe ./cmd/cli
 
+      - name: Package portable archive
+        shell: pwsh
+        run: |
+          Compress-Archive -Path bin/windows-x64/csda.exe,bin/windows-x64/tris -DestinationPath bin/windows-x64/windows-x64.zip
+
       - name: Install Inno Setup
         run: choco install innosetup --no-progress --yes
 
@@ -156,15 +105,17 @@ jobs:
         run: |
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=${{ needs.validate.outputs.version }}" installer/windows.iss
 
-      - name: Upload installer
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: windows-installer
-          path: bin/windows-x64/csda-windows-x64-setup.exe
+          name: windows-artifacts
+          path: |
+            bin/windows-x64/windows-x64.zip
+            bin/windows-x64/csda-windows-x64-setup.exe
           if-no-files-found: error
 
   release:
-    needs: [validate, portable, windows-installer]
+    needs: [validate, windows-installer]
     runs-on: ubuntu-latest
 
     steps:
