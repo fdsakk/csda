@@ -42,7 +42,7 @@ function SheetContent({
 }) {
   return (
     <BaseDialog.Portal>
-      <BaseDialog.Backdrop className="fixed inset-0 z-50 bg-black/50 backdrop-blur-md transition-opacity duration-150 data-[starting-style]:opacity-0 data-[ending-style]:opacity-0" />
+      <BaseDialog.Backdrop className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm transition-opacity duration-150 data-[starting-style]:opacity-0 data-[ending-style]:opacity-0" />
       <BaseDialog.Popup
         data-slot="sheet-content"
         className={cn(
