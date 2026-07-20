@@ -157,10 +157,10 @@ func TestFlagPlayerTiers(t *testing.T) {
 		{"head hit rate alone stays normal", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 500; r.DamageEvents, r.HeadHitRate = 40, .62 }, "normal"},
 		{"insufficient non-awp ttd sample stays normal", func(r *PlayerStatsReportRow) { r.NonAWPTTDWeightedMS = 300; r.NonAWPTTDSamples = 5 }, "normal"},
 		// AWP evidence is independent of rifle timing, but still sample-weighted.
-		{"awp ttd at cheater anchor with minimum sample", func(r *PlayerStatsReportRow) {
+		{"awp ttd at cheater anchor with minimum sample enters watch", func(r *PlayerStatsReportRow) {
 			r.NonAWPTTDWeightedMS = 500
 			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 180
-		}, "normal"},
+		}, "watch"},
 		{"awp ttd watch band", func(r *PlayerStatsReportRow) {
 			r.NonAWPTTDWeightedMS = 500
 			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 190
@@ -177,7 +177,7 @@ func TestFlagPlayerTiers(t *testing.T) {
 			r.IsAWPer = false
 			r.NonAWPTTDWeightedMS = 500
 			r.AWPTTDSamples, r.AWPTTDWeightedMS = 20, 180
-		}, "normal"},
+		}, "watch"},
 		{"insufficient awp sample stays normal", func(r *PlayerStatsReportRow) {
 			r.NonAWPTTDWeightedMS = 500
 			r.AWPTTDSamples, r.AWPTTDWeightedMS = 5, 200

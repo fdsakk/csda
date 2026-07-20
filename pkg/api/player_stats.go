@@ -127,7 +127,7 @@ func DefaultSuspicionConfig() SuspicionConfig {
 		HeadHitMinimumEvents:    30,
 		HeadHitWatchThreshold:   .50,
 		HeadHitCheaterThreshold: .60,
-		ScoreWatchThreshold:     52,
+		ScoreWatchThreshold:     45,
 		ScoreCheaterThreshold:   77,
 		MetricWatchEvidence:     .30,
 		MetricCheaterEvidence:   .85,
