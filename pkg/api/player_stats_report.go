@@ -380,13 +380,16 @@ type scoredSignal struct {
 func clamp01(value float64) float64 { return max(0, min(1, value)) }
 
 // anchoredEvidence maps a metric's watch and cheater anchors to configurable
-// evidence levels, while still allowing more extreme values to approach 1.
+// evidence levels. Values beyond the cheater anchor intentionally remain above
+// 1 until sample confidence is applied: otherwise an extreme small-sample
+// signal becomes indistinguishable from a merely strong larger-sample signal.
+// The fused evidence groups are clamped after confidence weighting.
 func anchoredEvidence(value, watch, cheater float64, lowerIsWorse bool, config SuspicionConfig) float64 {
 	position := (value - watch) / (cheater - watch)
 	if lowerIsWorse {
 		position = (watch - value) / (watch - cheater)
 	}
-	return clamp01(config.MetricWatchEvidence + position*(config.MetricCheaterEvidence-config.MetricWatchEvidence))
+	return max(0, config.MetricWatchEvidence+position*(config.MetricCheaterEvidence-config.MetricWatchEvidence))
 }
 
 func headHitEvidence(value float64, config SuspicionConfig) float64 {
@@ -426,7 +429,9 @@ func strongest(signals []scoredSignal) scoredSignal {
 // required core because accuracy, head-hit rate and K/D are heavily confounded
 // by skill. Those outcome stats can only add bounded support to an existing
 // timing anomaly, and only the strongest correlated metric in each group is
-// retained. AWP timing is separately down-weighted for one-shot/held-angle play.
+// retained. Low accuracy and head-hit rates are not negative evidence; their
+// absence simply leaves a small timing sample uncorroborated. AWP timing is
+// separately down-weighted for one-shot/held-angle play.
 func flagPlayer(row *PlayerStatsReportRow, config SuspicionConfig) {
 	row.Eligible = row.DemoCount >= config.MinimumDemos && row.Shots >= config.MinimumShots
 	if !row.Eligible {

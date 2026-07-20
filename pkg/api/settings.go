@@ -9,6 +9,17 @@ import (
 
 const thresholdsSettingKey = "thresholds"
 
+// migrateSuspicionConfig updates only values that exactly match historical
+// defaults. Explicit user calibration remains untouched.
+func migrateSuspicionConfig(config SuspicionConfig) SuspicionConfig {
+	if config.SampleConfidenceFloor == .75 && config.SampleConfidenceK == 30 {
+		defaults := DefaultSuspicionConfig()
+		config.SampleConfidenceFloor = defaults.SampleConfidenceFloor
+		config.SampleConfidenceK = defaults.SampleConfidenceK
+	}
+	return config
+}
+
 // GetThresholds returns the persisted suspicion config, or false when none has
 // been saved yet (the caller falls back to defaults).
 func GetThresholds(ctx context.Context, databasePath string) (SuspicionConfig, bool, error) {
@@ -29,7 +40,7 @@ func GetThresholds(ctx context.Context, databasePath string) (SuspicionConfig, b
 	if err := json.Unmarshal([]byte(raw), &config); err != nil {
 		return SuspicionConfig{}, false, err
 	}
-	return config, true, nil
+	return migrateSuspicionConfig(config), true, nil
 }
 
 // SaveThresholds persists the suspicion config so it survives restarts.

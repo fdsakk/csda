@@ -137,9 +137,12 @@ func DefaultSuspicionConfig() SuspicionConfig {
 		PrecisionWeight:         1,
 		PerformanceWeight:       .75,
 		SynergyWeight:           .35,
-		SampleConfidenceFloor:   .75,
-		SampleConfidenceK:       30,
-		ScoreCurveExponent:      .65,
+		// A timing signal at the hard minimum is useful enough to review, but
+		// not reliable enough to convict on its own. Confidence approaches full
+		// strength only after a substantially larger encounter sample.
+		SampleConfidenceFloor: .30,
+		SampleConfidenceK:     100,
+		ScoreCurveExponent:    .65,
 	}
 }
 

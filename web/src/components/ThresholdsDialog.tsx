@@ -20,6 +20,7 @@ type Field = {
   min?: number;
   max?: number;
   slider?: boolean;
+  advanced?: boolean;
 };
 
 type Group = { title: string; description: string; modes?: SuspicionConfig['flagMode'][]; fields: Field[] };
@@ -36,13 +37,21 @@ const GROUPS: Group[] = [
     ],
   },
   {
+    title: 'Sample confidence',
+    description: 'Timing can enter review at the hard minimum, but needs more encounters before it can carry a Cheater verdict without precision support.',
+    modes: ['score'],
+    fields: [
+      { key: 'sampleConfidenceK', label: 'Samples to stabilize', description: 'Larger values require more encounters before timing evidence reaches full strength.', step: 1, min: 1 },
+    ],
+  },
+  {
     title: 'Final score bands',
     description: 'The fused score is mapped to Normal, Watch or Cheater only after every evidence group has been combined.',
     modes: ['score'],
     fields: [
       { key: 'scoreWatchThreshold', label: 'Watch score', description: 'Minimum final score for Watch.', suffix: '/100', min: 0, max: 100, slider: true },
       { key: 'scoreCheaterThreshold', label: 'Cheater score', description: 'Minimum final score for Cheater.', suffix: '/100', min: 0, max: 100, slider: true },
-      { key: 'scoreCurveExponent', label: 'Score curve', description: 'Below 1 expands meaningful evidence toward the top of the 0–100 scale.', step: 0.05, min: 0.05, max: 2, slider: true },
+      { key: 'scoreCurveExponent', label: 'Score curve', description: 'Below 1 expands meaningful evidence toward the top of the 0–100 scale.', step: 0.05, min: 0.05, max: 2, slider: true, advanced: true },
     ],
   },
   {
@@ -50,10 +59,9 @@ const GROUPS: Group[] = [
     description: 'Metric anchors become soft evidence rather than immediate verdicts. Sample confidence prevents a small sample from carrying full strength.',
     modes: ['score'],
     fields: [
-      { key: 'metricWatchEvidence', label: 'Watch-anchor evidence', description: 'Evidence assigned at a metric’s watch anchor.', step: 1, suffix: '%', percent: true, slider: true },
-      { key: 'metricCheaterEvidence', label: 'Cheater-anchor evidence', description: 'Evidence assigned at a metric’s cheater anchor.', step: 1, suffix: '%', percent: true, slider: true },
-      { key: 'sampleConfidenceFloor', label: 'Confidence floor', description: 'Minimum retained evidence once the hard sample gate is met.', step: 1, suffix: '%', percent: true, slider: true },
-      { key: 'sampleConfidenceK', label: 'Confidence K', description: 'Samples needed to recover half of the confidence above the floor.', step: 1, min: 1 },
+      { key: 'metricWatchEvidence', label: 'Watch-anchor evidence', description: 'Evidence assigned at a metric’s watch anchor.', step: 1, suffix: '%', percent: true, slider: true, advanced: true },
+      { key: 'metricCheaterEvidence', label: 'Cheater-anchor evidence', description: 'Evidence assigned at a metric’s cheater anchor.', step: 1, suffix: '%', percent: true, slider: true, advanced: true },
+      { key: 'sampleConfidenceFloor', label: 'Minimum confidence', description: 'Evidence retained at the hard sample gate. The conservative default prevents a small sample from deciding Cheater on its own.', step: 1, suffix: '%', percent: true, slider: true, advanced: true },
     ],
   },
   {
@@ -74,7 +82,7 @@ const GROUPS: Group[] = [
     fields: [
       { key: 'awpTtdWatchMs', label: 'Evidence start', description: 'AWP TTD begins producing evidence below this value.', suffix: 'ms' },
       { key: 'awpTtdCheaterMs', label: 'Cheater anchor', description: 'AWP evidence reaches full strength at this value.', suffix: 'ms' },
-      { key: 'awpEvidenceExponent', label: 'Evidence curve', description: 'Above 1 suppresses ordinary AWP timings while preserving truly extreme values.', step: 0.1, min: 1, max: 5, slider: true },
+      { key: 'awpEvidenceExponent', label: 'Evidence curve', description: 'Above 1 suppresses ordinary AWP timings while preserving truly extreme values.', step: 0.1, min: 1, max: 5, slider: true, advanced: true },
     ],
   },
   {
@@ -82,7 +90,7 @@ const GROUPS: Group[] = [
     description: 'Head-hit and accuracy share one support group. They can strengthen suspicious timing but can never create a flag by themselves.',
     modes: ['score'],
     fields: [
-      { key: 'eliteHeadHitRate', label: 'Head-hit evidence start', description: 'First soft head-hit evidence anchor.', step: 1, suffix: '%', percent: true, slider: true },
+      { key: 'eliteHeadHitRate', label: 'Head-hit evidence start', description: 'First soft head-hit evidence anchor.', step: 1, suffix: '%', percent: true, slider: true, advanced: true },
       { key: 'headHitWatchThreshold', label: 'Head-hit watch anchor', description: 'Middle head-hit evidence anchor.', step: 1, suffix: '%', percent: true, slider: true },
       { key: 'headHitCheaterThreshold', label: 'Head-hit cheater anchor', description: 'High head-hit evidence anchor.', step: 1, suffix: '%', percent: true, slider: true },
       { key: 'eliteAccuracy', label: 'Accuracy watch anchor', description: 'Accuracy at this value receives watch-anchor evidence.', step: 1, suffix: '%', percent: true, slider: true },
@@ -94,8 +102,8 @@ const GROUPS: Group[] = [
     description: 'K/D cannot flag a player by itself. It only supports timing evidence, and does not stack with precision support.',
     modes: ['score'],
     fields: [
-      { key: 'eliteKd', label: 'K/D watch anchor', description: 'Start of K/D supporting evidence.', step: 0.1, min: 0.1 },
-      { key: 'eliteKdCheater', label: 'K/D cheater anchor', description: 'High K/D supporting evidence.', step: 0.1, min: 0.1 },
+      { key: 'eliteKd', label: 'K/D watch anchor', description: 'Start of K/D supporting evidence.', step: 0.1, min: 0.1, advanced: true },
+      { key: 'eliteKdCheater', label: 'K/D cheater anchor', description: 'High K/D supporting evidence.', step: 0.1, min: 0.1, advanced: true },
     ],
   },
   {
@@ -150,11 +158,11 @@ const GROUPS: Group[] = [
     description: 'Timing is required for every flag. Precision or K/D can add only a bounded support bonus after correlated metrics are collapsed.',
     modes: ['score'],
     fields: [
-      { key: 'timingWeight', label: 'Timing weight', description: 'Strength of the timing group.', step: 1, suffix: '%', percent: true, slider: true },
-      { key: 'awpTimingWeight', label: 'AWP timing weight', description: 'Reduces AWP evidence for one-shot kills and held angles.', step: 1, suffix: '%', percent: true, slider: true },
-      { key: 'precisionWeight', label: 'Precision support weight', description: 'Strength of head-hit or accuracy support.', step: 1, suffix: '%', percent: true, slider: true },
-      { key: 'performanceWeight', label: 'K/D support weight', description: 'Maximum strength of the gated K/D amplifier.', step: 1, suffix: '%', percent: true, slider: true },
-      { key: 'synergyWeight', label: 'Maximum support bonus', description: 'Caps how strongly precision or K/D can raise timing evidence.', step: 1, suffix: '%', percent: true, slider: true },
+      { key: 'timingWeight', label: 'Timing weight', description: 'Strength of the timing group.', step: 1, suffix: '%', percent: true, slider: true, advanced: true },
+      { key: 'awpTimingWeight', label: 'AWP timing weight', description: 'Reduces AWP evidence for one-shot kills and held angles.', step: 1, suffix: '%', percent: true, slider: true, advanced: true },
+      { key: 'precisionWeight', label: 'Precision support weight', description: 'Strength of head-hit or accuracy support.', step: 1, suffix: '%', percent: true, slider: true, advanced: true },
+      { key: 'performanceWeight', label: 'K/D support weight', description: 'Maximum strength of the gated K/D amplifier.', step: 1, suffix: '%', percent: true, slider: true, advanced: true },
+      { key: 'synergyWeight', label: 'Maximum support bonus', description: 'Caps how strongly precision or K/D can raise timing evidence.', step: 1, suffix: '%', percent: true, slider: true, advanced: true },
     ],
   },
 ];
@@ -199,7 +207,7 @@ function ThresholdField({ field, config, onChange }: { field: Field; config: Sus
 
   if (field.slider && max !== undefined) {
     return (
-      <div className="col-span-2 space-y-1.5" title={field.description}>
+      <div className="col-span-2 flex flex-col gap-1.5" title={field.description}>
         <label className="text-sm font-medium text-foreground">{field.label}</label>
         <div className="flex items-center gap-4">
           <Slider
@@ -208,7 +216,7 @@ function ThresholdField({ field, config, onChange }: { field: Field; config: Sus
             max={max}
             step={step}
             className="flex-1"
-            onValueChange={([value]) => commit(value)}
+            onValueChange={(value) => commit(typeof value === 'number' ? value : value[0])}
           />
           {numberBox}
         </div>
@@ -232,6 +240,31 @@ export function ThresholdsDialog({ onChanged }: { onChanged: () => void }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [failed, setFailed] = useState(false);
+
+  const renderGroups = (advanced: boolean) => config
+    ? GROUPS
+      .filter((group) => !group.modes || group.modes.includes(config.flagMode))
+      .map((group) => ({ ...group, fields: group.fields.filter((field) => Boolean(field.advanced) === advanced) }))
+      .filter((group) => group.fields.length > 0)
+      .map((group) => (
+        <section key={`${advanced ? 'advanced' : 'primary'}-${group.title}`}>
+          <div className="mb-4 flex items-center gap-1.5">
+            <h3 className="text-base font-semibold text-muted-foreground">{group.title}</h3>
+            <InfoTip text={group.description} />
+          </div>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+            {group.fields.map((field) => (
+              <ThresholdField
+                key={field.key}
+                field={field}
+                config={config}
+                onChange={(key, value) => setConfig((current) => current ? { ...current, [key]: value } : current)}
+              />
+            ))}
+          </div>
+        </section>
+      ))
+    : null;
 
   useEffect(() => {
     if (!open) return;
@@ -300,25 +333,15 @@ export function ThresholdsDialog({ onChanged }: { onChanged: () => void }) {
         <div className="cheat-sheet-scroll min-h-0 flex-1 overflow-y-auto px-6 pt-3 pb-6">
               {loading ? <p className="py-16 text-center text-sm text-muted-foreground">Loading thresholds…</p> : null}
               {!loading && config ? (
-                <div className="space-y-8">
-                  {GROUPS.filter((group) => !group.modes || group.modes.includes(config.flagMode)).map((group) => (
-                    <section key={group.title}>
-                      <div className="mb-4 flex items-center gap-1.5">
-                        <h3 className="text-base font-semibold text-muted-foreground">{group.title}</h3>
-                        <InfoTip text={group.description} />
-                      </div>
-                      <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-                        {group.fields.map((field) => (
-                          <ThresholdField
-                            key={field.key}
-                            field={field}
-                            config={config}
-                            onChange={(key, value) => setConfig((current) => current ? { ...current, [key]: value } : current)}
-                          />
-                        ))}
-                      </div>
-                    </section>
-                  ))}
+                <div className="flex flex-col gap-8">
+                  {renderGroups(false)}
+                  {config.flagMode === 'score' ? (
+                    <details className="rounded-lg border border-border p-4">
+                      <summary className="cursor-pointer text-sm font-medium text-foreground">Advanced model tuning</summary>
+                      <p className="mt-2 text-sm text-muted-foreground">Low-impact calibration controls. The defaults are intentionally conservative for small samples.</p>
+                      <div className="flex flex-col gap-8 pt-6">{renderGroups(true)}</div>
+                    </details>
+                  ) : null}
                 </div>
               ) : null}
         </div>
