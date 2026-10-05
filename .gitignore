@@ -29,3 +29,5 @@ node_modules
 docs/
 
 !validation/*.csv
+
+/AUDYT_PRACY_INZYNIERSKIEJ.md
