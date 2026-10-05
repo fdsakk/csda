@@ -176,6 +176,38 @@ export function getReport(): Promise<Report> {
   return request<Report>('/api/report');
 }
 
+export type PlayerEncounter = {
+  demoChecksum: string;
+  demoFileName: string;
+  mapName: string;
+  tickRate: number;
+  roundNumber: number;
+  victimSteamId: string;
+  victimName: string;
+  firstSpottedTick: number;
+  confirmedTick: number;
+  /** null when no shot was recorded for the encounter */
+  firstShotTick: number | null;
+  damageTick: number;
+  ttdMs: number;
+  /** null for rows stored before the column existed */
+  reactionMs: number | null;
+  /** no shot recorded: the reaction is the time to damage, not the time to the first shot */
+  reactionEstimated: boolean;
+  confirmedAngle: number;
+  firstShotAngle: number | null;
+  distanceMeters: number;
+  weaponName: string;
+  awp: boolean;
+  snap: boolean;
+  /** false when the timing lies outside 0–1000 ms and is excluded from the aggregates */
+  counted: boolean;
+};
+
+export function getPlayerEncounters(steamId: string): Promise<{ encounters: PlayerEncounter[] }> {
+  return request(`/api/players/${encodeURIComponent(steamId)}/encounters`);
+}
+
 export function getThresholds(): Promise<{ current: SuspicionConfig; defaults: SuspicionConfig }> {
   return request('/api/thresholds');
 }

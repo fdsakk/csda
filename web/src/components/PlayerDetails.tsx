@@ -1,6 +1,7 @@
 import { Gamepad2, Info } from 'lucide-react';
 import { Player, PlayerWeapon } from '@/api';
 import { Card } from '@/components/ui/card';
+import { PlayerEncounters } from '@/components/PlayerEncounters';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ms, number, pct } from '@/lib/format';
 import { useT } from '@/lib/i18n';
@@ -329,6 +330,7 @@ export function PlayerDetails({ player, weapons, scoreMode }: { player: Player; 
         </Card>
       </div>
 
+      <PlayerEncounters steamId={player.steamId} />
     </div>
     </TooltipProvider>
   );
