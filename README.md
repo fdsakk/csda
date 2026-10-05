@@ -66,6 +66,7 @@ Requirements:
 - Git
 - Go 1.23 or newer
 - Bun 1.3.0 or newer
+- Python 3.11 or newer, only to download the map geometry
 - Port `8080` available locally
 
 Steps:
@@ -77,7 +78,16 @@ Steps:
    cd csda
    ```
 
-2. Start the application:
+2. Install the map geometry used for visibility checks (once):
+
+   ```bash
+   scripts/fetch-tris.sh                  # downloads Awpy 2.0.2 geometry, needs Python 3.11+
+   scripts/fetch-tris.sh path/to/tris.zip # or install from a local archive, no network
+   ```
+
+   The script verifies every file against `scripts/tris.sha256`.
+
+3. Start the application:
 
    ```bash
    ./run.sh
@@ -86,8 +96,8 @@ Steps:
    If the executable bit was lost while copying the repository, restore it with
    `chmod +x run.sh` first.
 
-3. Open [http://127.0.0.1:8080](http://127.0.0.1:8080).
-4. Stop the server with `Ctrl+C`.
+4. Open [http://127.0.0.1:8080](http://127.0.0.1:8080).
+5. Stop the server with `Ctrl+C`.
 
 Extra server arguments are forwarded by the script. For example:
 

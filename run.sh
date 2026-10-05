@@ -35,5 +35,9 @@ fi
 echo "Building web UI with Bun..."
 (cd web && bun install --frozen-lockfile && bun run build)
 
+if ! compgen -G "tris/*.tri" >/dev/null && [ ! -f tris/tris.zip ]; then
+  echo "warning: no map geometry in ./tris, demo analysis will fail until you run scripts/fetch-tris.sh" >&2
+fi
+
 echo "Starting web server..."
 exec go run ./cmd/cli web "$@"
