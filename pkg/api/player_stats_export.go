@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -307,6 +308,76 @@ func assessExportedDemoQuality(demo ExportedDemo, version int) (demoQualityAsses
 	return assessDemoQuality(encounters), nil
 }
 
+// validateExportedDemo rejects numbers that no analysis can produce, so a
+// hand-edited or corrupted file cannot skew the aggregates.
+func validateExportedDemo(demo ExportedDemo) error {
+	if demo.TickRate < 0 || math.IsNaN(demo.TickRate) || math.IsInf(demo.TickRate, 0) {
+		return fmt.Errorf("invalid tick rate %g", demo.TickRate)
+	}
+	for _, s := range demo.PlayerStats {
+		counts := map[string]int{
+			"rounds": s.Rounds, "shots": s.Shots, "hitShots": s.HitShots, "damageEvents": s.DamageEvents,
+			"headHitEvents": s.HeadHitEvents, "kills": s.Kills, "deaths": s.Deaths, "headshotKills": s.HeadshotKills,
+			"smokeKills": s.SmokeKills, "wallKills": s.WallKills, "unspottedDamageEvents": s.UnspottedDamageEvents,
+			"firstBulletEncounters": s.FirstBulletEncounters, "firstBulletHeadHits": s.FirstBulletHeadHits,
+			"snapEvents": s.SnapEvents, "ttdSamples": s.TTDSamples, "movingShots": s.MovingShots,
+			"movingHitShots": s.MovingHitShots, "airborneShots": s.AirborneShots, "airborneHitShots": s.AirborneHitShots,
+			"flashedShots": s.FlashedShots, "flashedHitShots": s.FlashedHitShots, "scopedShots": s.ScopedShots,
+			"scopedHitShots": s.ScopedHitShots,
+		}
+		for name, value := range counts {
+			if value < 0 {
+				return fmt.Errorf("player %s: negative %s (%d)", s.SteamID, name, value)
+			}
+		}
+		if !validMeasurement(s.TTDSumMS) {
+			return fmt.Errorf("player %s: invalid ttdSumMs (%g)", s.SteamID, s.TTDSumMS)
+		}
+		for _, pair := range [][3]any{
+			{"hitShots", s.HitShots, s.Shots}, {"movingHitShots", s.MovingHitShots, s.MovingShots},
+			{"airborneHitShots", s.AirborneHitShots, s.AirborneShots}, {"flashedHitShots", s.FlashedHitShots, s.FlashedShots},
+			{"scopedHitShots", s.ScopedHitShots, s.ScopedShots}, {"headHitEvents", s.HeadHitEvents, s.DamageEvents},
+			{"headshotKills", s.HeadshotKills, s.Kills}, {"firstBulletHeadHits", s.FirstBulletHeadHits, s.FirstBulletEncounters},
+		} {
+			if pair[1].(int) > pair[2].(int) {
+				return fmt.Errorf("player %s: %s (%d) exceeds its total (%d)", s.SteamID, pair[0], pair[1], pair[2])
+			}
+		}
+	}
+	for _, w := range demo.WeaponStats {
+		for name, value := range map[string]int{"shots": w.Shots, "hitShots": w.HitShots, "damageEvents": w.DamageEvents, "headHitEvents": w.HeadHitEvents, "kills": w.Kills} {
+			if value < 0 {
+				return fmt.Errorf("weapon %s of player %s: negative %s (%d)", w.WeaponName, w.SteamID, name, value)
+			}
+		}
+		if w.HitShots > w.Shots {
+			return fmt.Errorf("weapon %s of player %s: hitShots (%d) exceeds shots (%d)", w.WeaponName, w.SteamID, w.HitShots, w.Shots)
+		}
+	}
+	for _, e := range demo.Encounters {
+		// -1 marks "not measured" (no shot attributed, or a version 1 payload).
+		for name, value := range map[string]float64{"firstShotTimeMs": e.FirstShotTimeMS, "reactionTimeMs": e.ReactionTimeMS, "firstShotAngle": e.FirstShotAngle} {
+			if !validMeasurement(value) && value != -1 {
+				return fmt.Errorf("encounter in round %d: invalid %s (%g)", e.RoundNumber, name, value)
+			}
+		}
+		for name, value := range map[string]float64{
+			"ttdMs": e.TTDMS, "ttdConfirmedMs": e.TTDConfirmedMS, "firstAngle": e.FirstAngle,
+			"confirmedAngle": e.ConfirmedAngle, "distanceMeters": e.DistanceMeters,
+		} {
+			if !validMeasurement(value) {
+				return fmt.Errorf("encounter in round %d: invalid %s (%g)", e.RoundNumber, name, value)
+			}
+		}
+	}
+	return nil
+}
+
+// validMeasurement accepts finite, non-negative numbers.
+func validMeasurement(value float64) bool {
+	return value >= 0 && !math.IsInf(value, 0)
+}
+
 // ImportPlayerStatsData merges an export payload into the database. Demos whose
 // checksum already exists are skipped; everything runs in a single transaction.
 func ImportPlayerStatsData(ctx context.Context, databasePath string, payload *PlayerStatsExport) (*PlayerStatsImportResult, error) {
@@ -319,6 +390,9 @@ func ImportPlayerStatsData(ctx context.Context, databasePath string, payload *Pl
 	for _, demo := range payload.Demos {
 		if demo.Checksum == "" {
 			return nil, errors.New("export contains a demo without a checksum")
+		}
+		if err := validateExportedDemo(demo); err != nil {
+			return nil, fmt.Errorf("demo %s: %w", demo.Checksum, err)
 		}
 	}
 

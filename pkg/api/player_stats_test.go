@@ -904,3 +904,49 @@ func TestFlagPlayerManualRequiresMinimumSample(t *testing.T) {
 		t.Fatalf("unexpected eligibility: %+v", row)
 	}
 }
+
+func TestImportRejectsImpossibleNumbers(t *testing.T) {
+	valid := func() ExportedDemo {
+		return ExportedDemo{
+			Checksum: "good", TickRate: 64,
+			PlayerStats: []ExportedPlayerDemoStats{{SteamID: "76561198000000001", Rounds: 10, Shots: 50, HitShots: 25, DamageEvents: 20, HeadHitEvents: 5, Kills: 4, HeadshotKills: 2}},
+			WeaponStats: []ExportedWeaponStats{{SteamID: "76561198000000001", WeaponName: "AK-47", Shots: 50, HitShots: 25}},
+			// -1 marks "not measured" and must stay valid
+			Encounters: []ExportedEncounter{{TTDMS: 150, ReactionTimeMS: -1, FirstShotTimeMS: -1, FirstShotAngle: -1}},
+		}
+	}
+	cases := map[string]func(*ExportedDemo){
+		"negative counter":     func(d *ExportedDemo) { d.PlayerStats[0].Kills = -1 },
+		"hits exceed shots":    func(d *ExportedDemo) { d.PlayerStats[0].HitShots = 51 },
+		"head hits exceed dmg": func(d *ExportedDemo) { d.PlayerStats[0].HeadHitEvents = 21 },
+		"hs kills exceed kill": func(d *ExportedDemo) { d.PlayerStats[0].HeadshotKills = 5 },
+		"moving hits exceed":   func(d *ExportedDemo) { d.PlayerStats[0].MovingHitShots = 1 },
+		"weapon hits exceed":   func(d *ExportedDemo) { d.WeaponStats[0].HitShots = 51 },
+		"negative ttd":         func(d *ExportedDemo) { d.Encounters[0].TTDMS = -5 },
+		"NaN timing":           func(d *ExportedDemo) { d.Encounters[0].TTDConfirmedMS = math.NaN() },
+		"negative tick rate":   func(d *ExportedDemo) { d.TickRate = -1 },
+	}
+	if err := validateExportedDemo(valid()); err != nil {
+		t.Fatalf("valid demo rejected: %v", err)
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			bad := valid()
+			bad.Checksum = "bad"
+			mutate(&bad)
+			dbPath := filepath.Join(t.TempDir(), "stats.db")
+			payload := &PlayerStatsExport{Format: PlayerStatsExportFormat, Version: PlayerStatsExportVersion, Demos: []ExportedDemo{valid(), bad}}
+			if _, err := ImportPlayerStatsData(context.Background(), dbPath, payload); err == nil {
+				t.Fatal("expected the import to be rejected")
+			}
+			// all or nothing: the valid demo listed before the bad one is not stored either
+			exported, err := ExportPlayerStatsData(context.Background(), dbPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(exported.Demos) != 0 {
+				t.Fatalf("%d demos stored by a rejected import", len(exported.Demos))
+			}
+		})
+	}
+}
