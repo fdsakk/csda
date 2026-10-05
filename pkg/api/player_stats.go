@@ -16,6 +16,7 @@ import (
 
 	"github.com/fdsakk/csda/internal/demo"
 	"github.com/fdsakk/csda/pkg/api/constants"
+	"github.com/fdsakk/csda/pkg/vis"
 	_ "modernc.org/sqlite"
 )
 
@@ -468,6 +469,10 @@ type analyzedDemoStats struct {
 	err         error
 }
 
+func errNoGeometry(mapName, trisDir string) error {
+	return fmt.Errorf("no map geometry for %q in %q: refusing to fall back to the inaccurate spotted-flag visibility (add %s/%s.tri or tris.zip, or enable AllowNoGeometry)", mapName, trisDir, trisDir, mapName)
+}
+
 func analyzeOneDemoForStats(ctx context.Context, path string, options PlayerStatsBuildOptions, contentHash string) analyzedDemoStats {
 	collector := newDemoStatsCollector(options.VisibilityConfirmationTicks, options.TrisDir)
 	analyzeOptions := AnalyzeDemoOptions{Context: ctx, Source: options.Source, statsCollector: collector}
@@ -480,8 +485,7 @@ func analyzeOneDemoForStats(ctx context.Context, path string, options PlayerStat
 		if match != nil {
 			mapName = match.MapName
 		}
-		err = fmt.Errorf("no map geometry for %q in %q: refusing to fall back to the inaccurate spotted-flag visibility (add %s/%s.tri or tris.zip, or enable AllowNoGeometry)", mapName, options.TrisDir, options.TrisDir, mapName)
-		return analyzedDemoStats{path: path, err: err}
+		return analyzedDemoStats{path: path, err: errNoGeometry(mapName, options.TrisDir)}
 	}
 	return analyzedDemoStats{path: path, match: match, stats: collector.result, contentHash: contentHash, err: err}
 }
@@ -496,7 +500,8 @@ func processDemo(ctx context.Context, db *sql.DB, path string, options PlayerSta
 		}
 	}()
 
-	if _, err := demo.GetDemoFromPath(path); err != nil {
+	header, err := demo.GetDemoFromPath(path)
+	if err != nil {
 		return analyzedDemoStats{path: path, err: err}
 	}
 	contentHash, err := demo.ContentHash(ctx, path)
@@ -508,6 +513,12 @@ func processDemo(ctx context.Context, db *sql.DB, path string, options PlayerSta
 		err := db.QueryRowContext(ctx, `SELECT analysis_version FROM demos WHERE checksum = ?`, contentHash).Scan(&version)
 		if err == nil && version == playerStatsAnalysisVersion {
 			return analyzedDemoStats{path: path}
+		}
+	}
+	// Fail before the expensive parse when the map has no usable geometry.
+	if !options.AllowNoGeometry {
+		if _, err := vis.LoadEngine(options.TrisDir, header.MapName); err != nil {
+			return analyzedDemoStats{path: path, err: fmt.Errorf("%w: %v", errNoGeometry(header.MapName, options.TrisDir), err)}
 		}
 	}
 	return analyzeOneDemoForStats(ctx, path, options, contentHash)

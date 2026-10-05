@@ -143,3 +143,17 @@ func TestRealDemoAnalysisIsCancellable(t *testing.T) {
 	}
 	t.Logf("cancelled after %v", elapsed)
 }
+
+func TestRealDemoWithoutGeometryFailsBeforeParsing(t *testing.T) {
+	path := realDemo(t)
+	started := time.Now()
+	result := processDemo(context.Background(), nil, path, PlayerStatsBuildOptions{
+		TrisDir: t.TempDir(), VisibilityConfirmationTicks: 3, Force: true,
+	})
+	if result.err == nil || !strings.Contains(result.err.Error(), "no map geometry") {
+		t.Fatalf("err=%v, want a missing geometry error", result.err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("took %s, the geometry check must run before the parser", elapsed)
+	}
+}
