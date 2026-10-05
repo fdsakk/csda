@@ -2,7 +2,9 @@ services:
   csda:
     build: .
     ports:
-      - "8080:8080"
+      # Loopback only: the app has no accounts. Set CSDA_BIND=0.0.0.0 to expose it
+      # (and enable Basic Auth in .env).
+      - "${CSDA_BIND:-127.0.0.1}:8080:8080"
     # Optional .env with CSDA_AUTH_USER / CSDA_AUTH_PASSWORD enables Basic Auth.
     env_file:
       - path: .env

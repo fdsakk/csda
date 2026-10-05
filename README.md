@@ -43,6 +43,9 @@ Steps:
 3. Open [http://localhost:8080](http://localhost:8080) in a browser.
 4. Drop one or more `.dem` files into the upload area.
 
+The port is published on `127.0.0.1` only. To expose the application to your
+network, set `CSDA_BIND=0.0.0.0` in `.env` and enable Basic Auth there.
+
 The database is persisted in the Docker volume `csda-data`. Useful commands:
 
 ```bash
