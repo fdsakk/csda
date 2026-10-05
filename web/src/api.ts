@@ -56,20 +56,22 @@ export type Player = {
   firstBulletHeadRate: number;
   snapRate: number;
   ttdSamples: number;
-  ttdMedianMs: number;
-  ttdWeightedMs: number;
-  ttdP10Ms: number;
+  ttdMedianMs: number | null;
+  ttdWeightedMs: number | null;
+  ttdP10Ms: number | null;
   awpKills: number;
   awpKillRate: number;
   isAwper: boolean;
   awpTtdSamples: number;
-  awpTtdMedianMs: number;
-  awpTtdWeightedMs: number;
+  awpTtdMedianMs: number | null;
+  awpTtdWeightedMs: number | null;
   nonAwpTtdSamples: number;
-  nonAwpTtdMedianMs: number;
-  nonAwpTtdWeightedMs: number;
+  nonAwpTtdMedianMs: number | null;
+  nonAwpTtdWeightedMs: number | null;
   nonAwpReactionSamples: number;
-  nonAwpReactionWeightedMs: number;
+  nonAwpReactionWeightedMs: number | null;
+  /** reaction samples without a recorded first shot (reaction estimated as time to damage) */
+  nonAwpReactionEstimatedSamples: number;
   /** 20 bins of 50ms across 0–1000ms */
   ttdHistogram: number[] | null;
   reactionHistogram: number[] | null;
@@ -82,11 +84,12 @@ export type Player = {
   scopedShots: number;
   scopedHitRate: number;
   reactionSamples: number;
-  reactionMedianMs: number;
-  reactionWeightedMs: number;
-  reactionP10Ms: number;
-  crosshairMedianAngle: number;
-  firstShotMedianAngle: number;
+  reactionEstimatedSamples: number;
+  reactionMedianMs: number | null;
+  reactionWeightedMs: number | null;
+  reactionP10Ms: number | null;
+  crosshairMedianAngle: number | null;
+  firstShotMedianAngle: number | null;
   firstShotAngleSamples: number;
   saved: boolean;
   banned: boolean;

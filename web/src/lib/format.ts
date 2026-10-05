@@ -19,4 +19,4 @@ export function scoreColor(score: number) {
 }
 
 export function pct(value: number) { return `${(value * 100).toFixed(1)}%`; }
-export function ms(value: number, samples: number) { return samples ? `${Math.round(value)} ms` : '—'; }
+export function ms(value: number | null, samples: number) { return samples && value != null ? `${Math.round(value)} ms` : '—'; }

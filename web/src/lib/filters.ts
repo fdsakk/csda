@@ -52,8 +52,8 @@ export function matchesFilters(player: Player, filters: TableFilters) {
   if (player.accuracy < filters.minAccuracy) return false;
   if (player.headHitRate < filters.minHeadHit) return false;
   if (player.headshotKillRate < filters.minHsKill) return false;
-  if (filters.maxTtdMs && !(player.nonAwpTtdSamples && player.nonAwpTtdWeightedMs <= filters.maxTtdMs)) return false;
-  if (filters.maxReactionMs && !(player.nonAwpReactionSamples && player.nonAwpReactionWeightedMs <= filters.maxReactionMs)) return false;
+  if (filters.maxTtdMs && !(player.nonAwpTtdWeightedMs != null && player.nonAwpTtdWeightedMs <= filters.maxTtdMs)) return false;
+  if (filters.maxReactionMs && !(player.nonAwpReactionWeightedMs != null && player.nonAwpReactionWeightedMs <= filters.maxReactionMs)) return false;
   if (filters.minKd && playerKd(player) < filters.minKd) return false;
   return true;
 }

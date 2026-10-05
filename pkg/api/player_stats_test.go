@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"path/filepath"
@@ -948,5 +949,73 @@ func TestImportRejectsImpossibleNumbers(t *testing.T) {
 				t.Fatalf("%d demos stored by a rejected import", len(exported.Demos))
 			}
 		})
+	}
+}
+
+func TestReportMarshalsNoMeasurementAsNull(t *testing.T) {
+	marshal := func(row PlayerStatsReportRow) map[string]any {
+		data, err := json.Marshal(row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		return decoded
+	}
+	fields := []string{
+		"ttdMeanMs", "ttdMedianMs", "ttdWeightedMs", "ttdP10Ms", "ttdUnder190Rate", "crosshairMedianAngle",
+		"awpTtdMedianMs", "awpTtdWeightedMs", "nonAwpTtdMedianMs", "nonAwpTtdWeightedMs",
+		"reactionMedianMs", "reactionWeightedMs", "reactionP10Ms", "nonAwpReactionWeightedMs", "firstShotMedianAngle",
+	}
+
+	empty := newPlayerEncounterSamples()
+	row := PlayerStatsReportRow{SteamID64: 7}
+	empty.apply(&row)
+	decoded := marshal(row)
+	for _, field := range fields {
+		if value, present := decoded[field]; !present || value != nil {
+			t.Errorf("%s = %v (present=%v), want null without samples", field, value, present)
+		}
+	}
+	if decoded["steamId"] != "7" {
+		t.Errorf("steamId = %v, want the string 7", decoded["steamId"])
+	}
+
+	// A measured 0 ms stays 0 and is not confused with a missing value.
+	measured := newPlayerEncounterSamples()
+	measured.add(1, 10, 0, 0, 0, 0, false)
+	row = PlayerStatsReportRow{}
+	measured.apply(&row)
+	decoded = marshal(row)
+	for _, field := range []string{"ttdMedianMs", "ttdWeightedMs", "nonAwpTtdMedianMs", "reactionMedianMs", "firstShotMedianAngle"} {
+		if value, ok := decoded[field].(float64); !ok || value != 0 {
+			t.Errorf("%s = %v, want a measured 0", field, decoded[field])
+		}
+	}
+	// AWP has no samples here, so its fields stay null while the others are set.
+	if decoded["awpTtdMedianMs"] != nil {
+		t.Errorf("awpTtdMedianMs = %v, want null", decoded["awpTtdMedianMs"])
+	}
+}
+
+func TestReactionCountsEstimatedSamples(t *testing.T) {
+	samples := newPlayerEncounterSamples()
+	// measured first shot (angle >= 0), then two encounters without a shot (angle -1)
+	samples.add(1, 10, 200, 150, 3, 2, false)
+	samples.add(1, 10, 180, 180, 3, -1, false)
+	samples.add(1, 10, 220, 220, 3, -1, true)
+	row := &PlayerStatsReportRow{}
+	samples.apply(row)
+	if row.ReactionSamples != 3 || row.ReactionEstimatedSamples != 2 {
+		t.Fatalf("reaction samples=%d estimated=%d, want 3 and 2", row.ReactionSamples, row.ReactionEstimatedSamples)
+	}
+	if row.NonAWPReactionSamples != 2 || row.NonAWPReactionEstimatedSamples != 1 {
+		t.Fatalf("non-AWP reaction samples=%d estimated=%d, want 2 and 1", row.NonAWPReactionSamples, row.NonAWPReactionEstimatedSamples)
+	}
+	// the estimate does not change the reaction values themselves
+	if row.ReactionMedianMS != 180 {
+		t.Fatalf("reaction median = %g, want 180", row.ReactionMedianMS)
 	}
 }

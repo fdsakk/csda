@@ -36,8 +36,8 @@ function Histogram({
   title: string;
   bins: number[] | null;
   samples: number;
-  medianMs: number;
-  p10Ms: number;
+  medianMs: number | null;
+  p10Ms: number | null;
   color: string;
   className?: string;
   help: string;
@@ -57,7 +57,7 @@ function Histogram({
           <InfoTip text={help} label={`About ${title}`} />
         </span>
         <span className="text-xs tabular-nums text-muted-foreground">
-          {samples ? <>median <span className="font-medium text-foreground">{Math.round(medianMs)} ms</span></> : 'no samples'}
+          {samples ? <>median <span className="font-medium text-foreground">{Math.round(medianMs ?? 0)} ms</span></> : 'no samples'}
         </span>
       </div>
       <svg viewBox={`0 0 ${width} ${height + 14}`} className="mt-auto w-full pt-6" role="img" aria-label={`${title} distribution`}>
@@ -72,8 +72,8 @@ function Histogram({
         })}
         {samples ? (
           <>
-            <line x1={x(p10Ms)} y1="2" x2={x(p10Ms)} y2={height} stroke="var(--foreground)" strokeOpacity="0.75" strokeWidth="1.5" strokeDasharray="3 2" />
-            <line x1={x(medianMs)} y1="0" x2={x(medianMs)} y2={height} stroke="var(--foreground)" strokeWidth="1.5" />
+            <line x1={x(p10Ms ?? 0)} y1="2" x2={x(p10Ms ?? 0)} y2={height} stroke="var(--foreground)" strokeOpacity="0.75" strokeWidth="1.5" strokeDasharray="3 2" />
+            <line x1={x(medianMs ?? 0)} y1="0" x2={x(medianMs ?? 0)} y2={height} stroke="var(--foreground)" strokeWidth="1.5" />
           </>
         ) : null}
         {[0, 250, 500, 750, 1000].map((tick) => (
@@ -144,8 +144,8 @@ export function PlayerDetails({ player, weapons, scoreMode }: { player: Player; 
       ]
     : [];
   const aimStats: [string, string][] = [
-    ['Crosshair @ exposure', `${player.crosshairMedianAngle.toFixed(1)}°`],
-    ['First shot error', player.firstShotAngleSamples ? `${player.firstShotMedianAngle.toFixed(1)}°` : '—'],
+    ['Crosshair @ exposure', player.crosshairMedianAngle != null ? `${player.crosshairMedianAngle.toFixed(1)}°` : '—'],
+    ['First shot error', player.firstShotMedianAngle != null ? `${player.firstShotMedianAngle.toFixed(1)}°` : '—'],
     ['Unspotted damage', pct(player.unspottedDamageRate)],
     ['Smoke / wall kills', `${player.smokeKills} / ${player.wallKills}`],
   ];
@@ -154,6 +154,7 @@ export function PlayerDetails({ player, weapons, scoreMode }: { player: Player; 
     ['TTD (AWP)', ms(player.awpTtdWeightedMs, player.awpTtdSamples)],
     ['TTD p10 (all)', ms(player.ttdP10Ms, player.ttdSamples)],
     ['Reaction (non-AWP)', ms(player.nonAwpReactionWeightedMs, player.nonAwpReactionSamples)],
+    ['Reaction estimated', player.reactionSamples ? `${player.reactionEstimatedSamples} of ${player.reactionSamples}` : '—'],
   ];
   return (
     <TooltipProvider>
@@ -177,7 +178,7 @@ export function PlayerDetails({ player, weapons, scoreMode }: { player: Player; 
           p10Ms={player.reactionP10Ms}
           color="var(--chart-2)"
           className="lg:col-start-2 lg:row-start-1"
-          help={t('The solid line marks the median reaction time. The brighter dashed line marks p10: the threshold reached by the fastest 10% of reactions.', 'Ciągła linia oznacza medianę czasu reakcji. Jaśniejsza przerywana linia oznacza p10: próg osiągany przez najszybsze 10% reakcji.')}
+          help={t('The solid line marks the median reaction time. The brighter dashed line marks p10: the threshold reached by the fastest 10% of reactions. When no shot was recorded, the reaction is estimated as the time to damage; \'Reaction estimated\' counts those encounters.', 'Ciągła linia oznacza medianę czasu reakcji. Jaśniejsza przerywana linia oznacza p10: próg osiągany przez najszybsze 10% reakcji. Gdy nie zarejestrowano strzału, reakcja jest estymowana jako czas do obrażeń; „Reaction estimated” liczy takie starcia.')}
         />
         <Card className="space-y-2 p-3 lg:col-start-1 lg:row-start-2">
           <span className="mb-3 block text-sm font-semibold text-muted-foreground">Kills by weapon</span>

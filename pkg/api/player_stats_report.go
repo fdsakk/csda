@@ -69,15 +69,20 @@ type PlayerStatsReportRow struct {
 	NonAWPTTDWeightedMS      float64  `json:"nonAwpTtdWeightedMs"`
 	NonAWPReactionSamples    int      `json:"nonAwpReactionSamples"`
 	NonAWPReactionWeightedMS float64  `json:"nonAwpReactionWeightedMs"`
+	// Reaction samples whose first shot was not recorded: the reaction is then
+	// estimated as the time to damage instead of measured at the shot.
+	NonAWPReactionEstimatedSamples int `json:"nonAwpReactionEstimatedSamples"`
 	// 20 bins of 50ms across 0–1000ms, for the UI distribution charts.
-	TTDHistogram         []int   `json:"ttdHistogram"`
-	ReactionHistogram    []int   `json:"reactionHistogram"`
-	ReactionSamples      int     `json:"reactionSamples"`
-	ReactionMedianMS     float64 `json:"reactionMedianMs"`
-	ReactionWeightedMS   float64 `json:"reactionWeightedMs"`
-	ReactionP10MS        float64 `json:"reactionP10Ms"`
-	CrosshairMedianAngle float64 `json:"crosshairMedianAngle"`
-	FirstShotMedianAngle float64 `json:"firstShotMedianAngle"`
+	TTDHistogram      []int `json:"ttdHistogram"`
+	ReactionHistogram []int `json:"reactionHistogram"`
+	ReactionSamples   int   `json:"reactionSamples"`
+	// See NonAWPReactionEstimatedSamples.
+	ReactionEstimatedSamples int     `json:"reactionEstimatedSamples"`
+	ReactionMedianMS         float64 `json:"reactionMedianMs"`
+	ReactionWeightedMS       float64 `json:"reactionWeightedMs"`
+	ReactionP10MS            float64 `json:"reactionP10Ms"`
+	CrosshairMedianAngle     float64 `json:"crosshairMedianAngle"`
+	FirstShotMedianAngle     float64 `json:"firstShotMedianAngle"`
 	// Encounters with an attributed first shot; the angle is undefined (not 0°) without any.
 	FirstShotAngleSamples int                   `json:"firstShotAngleSamples"`
 	MovingShots           int                   `json:"movingShots"`
@@ -99,12 +104,46 @@ type PlayerStatsReportRow struct {
 	TriggeredRules        []PlayerSuspicionRule `json:"triggeredRules"`
 }
 
+// optionalMeasure returns nil when nothing was measured: "no samples" must not
+// read as a measured 0 ms or 0°.
+func optionalMeasure(value float64, samples int) *float64 {
+	if samples == 0 {
+		return nil
+	}
+	return &value
+}
+
 func (row PlayerStatsReportRow) MarshalJSON() ([]byte, error) {
 	type alias PlayerStatsReportRow
 	return json.Marshal(struct {
 		*alias
-		SteamID string `json:"steamId"`
-	}{alias: (*alias)(&row), SteamID: strconv.FormatUint(row.SteamID64, 10)})
+		SteamID                  string   `json:"steamId"`
+		TTDMeanMS                *float64 `json:"ttdMeanMs"`
+		TTDMedianMS              *float64 `json:"ttdMedianMs"`
+		TTDWeightedMS            *float64 `json:"ttdWeightedMs"`
+		TTDP10MS                 *float64 `json:"ttdP10Ms"`
+		TTDUnder190Rate          *float64 `json:"ttdUnder190Rate"`
+		CrosshairMedianAngle     *float64 `json:"crosshairMedianAngle"`
+		AWPTTDMedianMS           *float64 `json:"awpTtdMedianMs"`
+		AWPTTDWeightedMS         *float64 `json:"awpTtdWeightedMs"`
+		NonAWPTTDMedianMS        *float64 `json:"nonAwpTtdMedianMs"`
+		NonAWPTTDWeightedMS      *float64 `json:"nonAwpTtdWeightedMs"`
+		ReactionMedianMS         *float64 `json:"reactionMedianMs"`
+		ReactionWeightedMS       *float64 `json:"reactionWeightedMs"`
+		ReactionP10MS            *float64 `json:"reactionP10Ms"`
+		NonAWPReactionWeightedMS *float64 `json:"nonAwpReactionWeightedMs"`
+		FirstShotMedianAngle     *float64 `json:"firstShotMedianAngle"`
+	}{
+		alias: (*alias)(&row), SteamID: strconv.FormatUint(row.SteamID64, 10),
+		TTDMeanMS: optionalMeasure(row.TTDMeanMS, row.TTDSamples), TTDMedianMS: optionalMeasure(row.TTDMedianMS, row.TTDSamples),
+		TTDWeightedMS: optionalMeasure(row.TTDWeightedMS, row.TTDSamples), TTDP10MS: optionalMeasure(row.TTDP10MS, row.TTDSamples),
+		TTDUnder190Rate: optionalMeasure(row.TTDUnder190Rate, row.TTDSamples), CrosshairMedianAngle: optionalMeasure(row.CrosshairMedianAngle, row.TTDSamples),
+		AWPTTDMedianMS: optionalMeasure(row.AWPTTDMedianMS, row.AWPTTDSamples), AWPTTDWeightedMS: optionalMeasure(row.AWPTTDWeightedMS, row.AWPTTDSamples),
+		NonAWPTTDMedianMS: optionalMeasure(row.NonAWPTTDMedianMS, row.NonAWPTTDSamples), NonAWPTTDWeightedMS: optionalMeasure(row.NonAWPTTDWeightedMS, row.NonAWPTTDSamples),
+		ReactionMedianMS: optionalMeasure(row.ReactionMedianMS, row.ReactionSamples), ReactionWeightedMS: optionalMeasure(row.ReactionWeightedMS, row.ReactionSamples),
+		ReactionP10MS: optionalMeasure(row.ReactionP10MS, row.ReactionSamples), NonAWPReactionWeightedMS: optionalMeasure(row.NonAWPReactionWeightedMS, row.NonAWPReactionSamples),
+		FirstShotMedianAngle: optionalMeasure(row.FirstShotMedianAngle, row.FirstShotAngleSamples),
+	})
 }
 
 type PlayerWeaponReportRow struct {
@@ -254,6 +293,8 @@ type playerEncounterSamples struct {
 	ttd, reaction                    []float64
 	awpTTD, nonAWPTTD                []float64
 	nonAWPReaction                   []float64
+	reactionEstimated                int
+	nonAWPReactionEstimated          int
 	crosshairAngles, firstShotAngles []float64
 	ttdByDemo, reactionByDemo        map[int64]*demoSamples
 	awpTTDByDemo, nonAWPTTDByDemo    map[int64]*demoSamples
@@ -294,11 +335,20 @@ func (s *playerEncounterSamples) add(demoID int64, rounds int, ttd, reaction, cr
 	}
 	// reaction_time_ms is -1 on rows stored before the column existed
 	if reaction >= 0 && reaction <= 1000 {
+		// A negative first-shot angle marks an encounter without a recorded
+		// shot: its reaction is the time to damage, an estimate.
+		estimated := firstShotAngle < 0
 		s.reaction = append(s.reaction, reaction)
 		appendDemoSample(s.reactionByDemo, demoID, rounds, reaction)
+		if estimated {
+			s.reactionEstimated++
+		}
 		if !isAWP {
 			s.nonAWPReaction = append(s.nonAWPReaction, reaction)
 			appendDemoSample(s.nonAWPReactionByDemo, demoID, rounds, reaction)
+			if estimated {
+				s.nonAWPReactionEstimated++
+			}
 		}
 	}
 }
@@ -324,6 +374,7 @@ func (s *playerEncounterSamples) apply(row *PlayerStatsReportRow) {
 		row.NonAWPTTDWeightedMS = row.NonAWPTTDMedianMS
 	}
 	row.NonAWPReactionSamples = len(s.nonAWPReaction)
+	row.NonAWPReactionEstimatedSamples = s.nonAWPReactionEstimated
 	row.NonAWPReactionWeightedMS = roundWeightedDemoMedian(s.nonAWPReactionByDemo)
 	if row.NonAWPReactionWeightedMS == 0 {
 		row.NonAWPReactionWeightedMS = percentile(s.nonAWPReaction, .5)
@@ -339,6 +390,7 @@ func (s *playerEncounterSamples) apply(row *PlayerStatsReportRow) {
 	row.FirstShotAngleSamples = len(s.firstShotAngles)
 
 	row.ReactionSamples = len(s.reaction)
+	row.ReactionEstimatedSamples = s.reactionEstimated
 	row.ReactionMedianMS = percentile(s.reaction, .5)
 	row.ReactionWeightedMS = roundWeightedDemoMedian(s.reactionByDemo)
 	row.ReactionP10MS = percentile(s.reaction, .1)
@@ -772,7 +824,15 @@ func ExportPlayerStatsReport(ctx context.Context, options PlayerStatsReportOptio
 
 func f(value float64) string { return strconv.FormatFloat(value, 'f', 4, 64) }
 func i(value int) string     { return strconv.Itoa(value) }
-func u(value uint64) string  { return strconv.FormatUint(value, 10) }
+
+// fOpt writes an empty cell when nothing was measured, so "no samples" is not a 0.
+func fOpt(value float64, samples int) string {
+	if samples == 0 {
+		return ""
+	}
+	return f(value)
+}
+func u(value uint64) string { return strconv.FormatUint(value, 10) }
 func writeCSV(path string, lines [][]string) error {
 	file, err := os.Create(path)
 	if err != nil {
@@ -787,13 +847,13 @@ func writeCSV(path string, lines [][]string) error {
 	return err
 }
 func writePlayersCSV(path string, rows []PlayerStatsReportRow) error {
-	lines := [][]string{{"steamid", "name", "aliases", "demos", "rounds", "shots", "hit shots", "accuracy", "damage events", "head hits", "head hit rate", "kills", "headshot kills", "headshot kill rate", "smoke kills", "wall kills", "unspotted damage rate", "first bullet head rate", "snap rate", "ttd samples", "ttd mean ms", "ttd pooled median ms", "ttd weighted ms", "ttd p10 ms", "ttd under 190 rate", "reaction samples", "reaction median ms", "reaction weighted ms", "reaction p10 ms", "crosshair median angle", "first shot median angle", "moving shots", "moving hit rate", "airborne shots", "airborne hit rate", "flashed shots", "flashed hit rate", "scoped shots", "scoped hit rate", "eligible", "status", "suspicion score", "timing score", "precision score", "performance score", "triggered rules"}}
+	lines := [][]string{{"steamid", "name", "aliases", "demos", "rounds", "shots", "hit shots", "accuracy", "damage events", "head hits", "head hit rate", "kills", "headshot kills", "headshot kill rate", "smoke kills", "wall kills", "unspotted damage rate", "first bullet head rate", "snap rate", "ttd samples", "ttd mean ms", "ttd pooled median ms", "ttd weighted ms", "ttd p10 ms", "ttd under 190 rate", "reaction samples", "reaction estimated samples", "reaction median ms", "reaction weighted ms", "reaction p10 ms", "crosshair median angle", "first shot median angle", "moving shots", "moving hit rate", "airborne shots", "airborne hit rate", "flashed shots", "flashed hit rate", "scoped shots", "scoped hit rate", "eligible", "status", "suspicion score", "timing score", "precision score", "performance score", "triggered rules"}}
 	for _, r := range rows {
 		rules := make([]string, len(r.TriggeredRules))
 		for x, rule := range r.TriggeredRules {
 			rules[x] = fmt.Sprintf("%s:%s(value=%.2f,sample=%d,evidence=%.2f)", rule.Name, rule.Tier, rule.Value, rule.Sample, rule.Score)
 		}
-		lines = append(lines, []string{u(r.SteamID64), r.Name, strings.Join(r.Names, " | "), i(r.DemoCount), i(r.Rounds), i(r.Shots), i(r.HitShots), f(r.Accuracy), i(r.DamageEvents), i(r.HeadHitEvents), f(r.HeadHitRate), i(r.Kills), i(r.HeadshotKills), f(r.HeadshotKillRate), i(r.SmokeKills), i(r.WallKills), f(r.UnspottedDamageRate), f(r.FirstBulletHeadRate), f(r.SnapRate), i(r.TTDSamples), f(r.TTDMeanMS), f(r.TTDMedianMS), f(r.TTDWeightedMS), f(r.TTDP10MS), f(r.TTDUnder190Rate), i(r.ReactionSamples), f(r.ReactionMedianMS), f(r.ReactionWeightedMS), f(r.ReactionP10MS), f(r.CrosshairMedianAngle), f(r.FirstShotMedianAngle), i(r.MovingShots), f(r.MovingHitRate), i(r.AirborneShots), f(r.AirborneHitRate), i(r.FlashedShots), f(r.FlashedHitRate), i(r.ScopedShots), f(r.ScopedHitRate), strconv.FormatBool(r.Eligible), r.Status, f(r.SuspicionScore), f(r.TimingScore), f(r.PrecisionScore), f(r.PerformanceScore), strings.Join(rules, " | ")})
+		lines = append(lines, []string{u(r.SteamID64), r.Name, strings.Join(r.Names, " | "), i(r.DemoCount), i(r.Rounds), i(r.Shots), i(r.HitShots), f(r.Accuracy), i(r.DamageEvents), i(r.HeadHitEvents), f(r.HeadHitRate), i(r.Kills), i(r.HeadshotKills), f(r.HeadshotKillRate), i(r.SmokeKills), i(r.WallKills), f(r.UnspottedDamageRate), f(r.FirstBulletHeadRate), f(r.SnapRate), i(r.TTDSamples), fOpt(r.TTDMeanMS, r.TTDSamples), fOpt(r.TTDMedianMS, r.TTDSamples), fOpt(r.TTDWeightedMS, r.TTDSamples), fOpt(r.TTDP10MS, r.TTDSamples), fOpt(r.TTDUnder190Rate, r.TTDSamples), i(r.ReactionSamples), i(r.ReactionEstimatedSamples), fOpt(r.ReactionMedianMS, r.ReactionSamples), fOpt(r.ReactionWeightedMS, r.ReactionSamples), fOpt(r.ReactionP10MS, r.ReactionSamples), fOpt(r.CrosshairMedianAngle, r.TTDSamples), fOpt(r.FirstShotMedianAngle, r.FirstShotAngleSamples), i(r.MovingShots), f(r.MovingHitRate), i(r.AirborneShots), f(r.AirborneHitRate), i(r.FlashedShots), f(r.FlashedHitRate), i(r.ScopedShots), f(r.ScopedHitRate), strconv.FormatBool(r.Eligible), r.Status, f(r.SuspicionScore), f(r.TimingScore), f(r.PrecisionScore), f(r.PerformanceScore), strings.Join(rules, " | ")})
 	}
 	return writeCSV(path, lines)
 }

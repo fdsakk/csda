@@ -117,6 +117,8 @@ export function PlayerTable({
     }).toSorted((a, b) => {
       // saved players pin to the top only under the default (status) sort
       if (sortKey === 'status' && a.saved !== b.saved) return a.saved ? -1 : 1;
+      // players without a measurement sort last in either direction
+      if (sortKey !== 'status' && (a[sortKey] == null || b[sortKey] == null)) return Number(a[sortKey] == null) - Number(b[sortKey] == null);
       const order = sortKey === 'status'
         ? STATUS_RANK[a.status] - STATUS_RANK[b.status] || a.suspicionScore - b.suspicionScore
         : (() => {
