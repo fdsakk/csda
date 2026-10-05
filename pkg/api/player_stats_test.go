@@ -1019,3 +1019,12 @@ func TestReactionCountsEstimatedSamples(t *testing.T) {
 		t.Fatalf("reaction median = %g, want 180", row.ReactionMedianMS)
 	}
 }
+
+func TestCSVLeavesMissingMeasurementsEmpty(t *testing.T) {
+	if got := fOpt(0, 0); got != "" {
+		t.Fatalf("no samples = %q, want an empty cell", got)
+	}
+	if got := fOpt(0, 3); got != "0.0000" {
+		t.Fatalf("measured 0 = %q, want 0.0000", got)
+	}
+}
