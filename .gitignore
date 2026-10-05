@@ -27,3 +27,5 @@ node_modules
 /sample-demos/
 /sample-analysis/
 docs/
+
+!validation/*.csv
