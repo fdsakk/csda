@@ -26,6 +26,7 @@ export default function App() {
   const [guideOpen, setGuideOpen] = useState(false);
   const [scoreMode, setScoreMode] = useState(true);
   const completedRef = useRef('');
+  const connectionLostRef = useRef(false);
 
   const loadAll = useCallback(async () => {
     try {
@@ -33,7 +34,7 @@ export default function App() {
       setReport(nextReport); setJobs(nextJobs); setScoreMode(thresholds.current.flagMode !== 'manual'); setError('');
       completedRef.current = finishedSignature(nextJobs);
     }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to load data'); }
+    catch (cause) { setError(`API offline — ${cause instanceof Error ? cause.message : 'Unable to load data'}`); }
     finally { setLoading(false); }
   }, []);
 
@@ -63,17 +64,28 @@ export default function App() {
     // reconnects automatically. Refetch the report when the set of finished
     // jobs changes so the table updates once analysis completes.
     const source = new EventSource('/api/events');
+    source.onopen = () => {
+      // After a reconnect the table may be stale: reload everything and clear the banner.
+      if (connectionLostRef.current) {
+        connectionLostRef.current = false;
+        void loadAll();
+      }
+    };
+    source.onerror = () => {
+      connectionLostRef.current = true;
+      setError(t('Connection to the server lost, reconnecting…', 'Utracono połączenie z serwerem, ponawiam…'));
+    };
     source.onmessage = (event) => {
       const nextJobs: Job[] = JSON.parse(event.data);
       setJobs(nextJobs);
       const signature = finishedSignature(nextJobs);
       if (signature !== completedRef.current) {
         completedRef.current = signature;
-        getReport().then(setReport).catch(() => { /* banner from loadAll covers outages */ });
+        getReport().then(setReport).catch((cause) => setError(cause instanceof Error ? cause.message : 'Unable to refresh the report'));
       }
     };
     return () => source.close();
-  }, []);
+  }, [loadAll, t]);
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-6 sm:py-10">
@@ -93,7 +105,7 @@ export default function App() {
       <Dropzone onQueued={(job) => setJobs((current) => [job, ...current])} />
       <JobsList jobs={jobs} onDismiss={(job) => void dismissJob(job)} />
 
-      {error ? <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">API offline — {error}</div> : null}
+      {error ? <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div> : null}
 
       {loading ? (
         <div className="py-20 text-center text-sm text-muted-foreground">Loading…</div>

@@ -251,7 +251,11 @@ export function PlayerTable({
             })}
           </TableBody>
         </Table>
-        {!shown.length ? <div className="py-14 text-center text-sm text-muted-foreground">No players match these filters.</div> : null}
+        {!shown.length ? (
+          <div className="py-14 text-center text-sm text-muted-foreground">
+            {players.length ? t('No players match these filters.', 'Żaden gracz nie pasuje do filtrów.') : t('No demos analyzed yet. Drop .dem files above to build the player database.', 'Brak przeanalizowanych dem. Wgraj pliki .dem powyżej, aby zbudować bazę graczy.')}
+          </div>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
