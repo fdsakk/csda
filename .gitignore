@@ -3,6 +3,8 @@
 .tools/
 dist
 !web/dist/
+web/dist/*
+!web/dist/.gitkeep
 bin
 node_modules
 *.exe
