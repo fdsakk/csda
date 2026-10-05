@@ -311,7 +311,7 @@ func TestStoreAndAggregateMultipleDemosBySteamID(t *testing.T) {
 			stats.Encounters = append(stats.Encounters, DemoEncounter{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: ttd, TTDConfirmedMS: 120, ReactionTimeMS: 100, ConfirmedAngle: 3, FirstShotAngle: 1, WeaponName: weapon})
 		}
 		stats.Encounters = append(stats.Encounters, DemoEncounter{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 1500, ReactionTimeMS: 1500})
-		if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+		if err := storeAnalyzedDemo(ctx, db, match, stats, match.Checksum); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -352,11 +352,11 @@ func TestStoreReplacesExistingDemoChecksum(t *testing.T) {
 	defer db.Close()
 	match := &Match{Checksum: "same", DemoFilePath: "a.dem", DemoFileName: "a", Date: time.Now(), Source: constants.DemoSourceValve}
 	stats := DemoStats{Players: map[uint64]*DemoPlayerStats{1: {SteamID64: 1, Name: "one", Shots: 10}}, Weapons: map[uint64]map[string]*DemoWeaponStats{}}
-	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+	if err := storeAnalyzedDemo(ctx, db, match, stats, match.Checksum); err != nil {
 		t.Fatal(err)
 	}
 	stats.Players[1].Shots = 25
-	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+	if err := storeAnalyzedDemo(ctx, db, match, stats, match.Checksum); err != nil {
 		t.Fatal(err)
 	}
 	var demos, shots int
@@ -371,44 +371,99 @@ func TestStoreReplacesExistingDemoChecksum(t *testing.T) {
 	}
 }
 
-func TestStoreReplacesDemoWithSameFileNameAndMap(t *testing.T) {
+func TestStoreKeepsDifferentDemosWithSameFileNameAndMap(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "stats.db")
 	db, err := openPlayerStatsDB(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer db.Close()
 	stats := DemoStats{Players: map[uint64]*DemoPlayerStats{1: {SteamID64: 1, Name: "one", Shots: 10}}, Weapons: map[uint64]map[string]*DemoWeaponStats{}}
-	// Same demo file re-analyzed with a different checksum (e.g. the file size
-	// changed between machines) must replace the previous analysis.
-	first := &Match{Checksum: "old", DemoFilePath: "auto-1.dem", DemoFileName: "auto-1", MapName: "de_mirage", Date: time.Now(), Source: constants.DemoSourceValve}
-	if err := storeAnalyzedDemo(ctx, db, first, stats); err != nil {
+	// Two different matches, same file name and map, same weak header checksum:
+	// only the content hash tells them apart.
+	first := &Match{Checksum: "header", DemoFilePath: "match.dem", DemoFileName: "match", MapName: "de_mirage", Date: time.Now(), Source: constants.DemoSourceValve}
+	if err := storeAnalyzedDemo(ctx, db, first, stats, "hash-of-first-match"); err != nil {
 		t.Fatal(err)
 	}
 	stats.Players[1].Shots = 30
-	second := &Match{Checksum: "new", DemoFilePath: "auto-1.dem", DemoFileName: "auto-1", MapName: "de_mirage", Date: time.Now(), Source: constants.DemoSourceValve}
-	if err := storeAnalyzedDemo(ctx, db, second, stats); err != nil {
+	second := &Match{Checksum: "header", DemoFilePath: "match.dem", DemoFileName: "match", MapName: "de_mirage", Date: time.Now(), Source: constants.DemoSourceValve}
+	if err := storeAnalyzedDemo(ctx, db, second, stats, "hash-of-second-match"); err != nil {
 		t.Fatal(err)
 	}
-	// A demo with the same file name on another map must not be replaced.
-	other := &Match{Checksum: "other", DemoFilePath: "auto-1.dem", DemoFileName: "auto-1", MapName: "de_dust2", Date: time.Now(), Source: constants.DemoSourceValve}
-	if err := storeAnalyzedDemo(ctx, db, other, stats); err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
 	var demos int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM demos`).Scan(&demos); err != nil {
 		t.Fatal(err)
 	}
 	if demos != 2 {
-		t.Fatalf("demos=%d, want 2 (replaced same-name same-map, kept other map)", demos)
+		t.Fatalf("demos=%d, want 2: different content must never replace each other", demos)
 	}
-	var shots int
-	if err := db.QueryRow(`SELECT s.shots FROM player_demo_stats s JOIN demos d ON d.id=s.demo_id WHERE d.checksum='new'`).Scan(&shots); err != nil {
+
+	// The same bytes under another name are the same demo: re-analysis replaces.
+	stats.Players[1].Shots = 50
+	renamed := &Match{Checksum: "header", DemoFilePath: "renamed.dem", DemoFileName: "renamed", MapName: "de_mirage", Date: time.Now(), Source: constants.DemoSourceValve}
+	if err := storeAnalyzedDemo(ctx, db, renamed, stats, "hash-of-second-match"); err != nil {
 		t.Fatal(err)
 	}
-	if shots != 30 {
-		t.Fatalf("shots=%d, want 30 from the newer analysis", shots)
+	var shots int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM demos`).Scan(&demos); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT s.shots FROM player_demo_stats s JOIN demos d ON d.id=s.demo_id WHERE d.checksum='hash-of-second-match'`).Scan(&shots); err != nil {
+		t.Fatal(err)
+	}
+	if demos != 2 || shots != 50 {
+		t.Fatalf("demos=%d shots=%d, want 2/50", demos, shots)
+	}
+}
+
+func TestStoreReplacesLegacyHeaderChecksumOnlyWithSameNameAndMap(t *testing.T) {
+	ctx := context.Background()
+	db, err := openPlayerStatsDB(filepath.Join(t.TempDir(), "stats.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	stats := DemoStats{Players: map[uint64]*DemoPlayerStats{1: {SteamID64: 1, Name: "one", Shots: 10}}, Weapons: map[uint64]map[string]*DemoWeaponStats{}}
+	// Rows written before content hashes existed are identified by the header checksum.
+	legacy := &Match{Checksum: "abc123", DemoFilePath: "auto.dem", DemoFileName: "auto", MapName: "de_mirage", Date: time.Now(), Source: constants.DemoSourceValve}
+	if err := storeAnalyzedDemo(ctx, db, legacy, stats, "abc123"); err != nil {
+		t.Fatal(err)
+	}
+	unrelated := &Match{Checksum: "ffffff", DemoFilePath: "auto.dem", DemoFileName: "auto", MapName: "de_mirage", Date: time.Now(), Source: constants.DemoSourceValve}
+	if err := storeAnalyzedDemo(ctx, db, unrelated, stats, "hash-unrelated"); err != nil {
+		t.Fatal(err)
+	}
+	// Same file reanalyzed: same header checksum, same name, same map.
+	again := &Match{Checksum: "abc123", DemoFilePath: "auto.dem", DemoFileName: "auto", MapName: "de_mirage", Date: time.Now(), Source: constants.DemoSourceValve}
+	if err := storeAnalyzedDemo(ctx, db, again, stats, "hash-new-format"); err != nil {
+		t.Fatal(err)
+	}
+	var demos, legacyRows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM demos`).Scan(&demos); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM demos WHERE checksum='abc123'`).Scan(&legacyRows); err != nil {
+		t.Fatal(err)
+	}
+	if demos != 2 || legacyRows != 0 {
+		t.Fatalf("demos=%d legacyRows=%d, want 2/0", demos, legacyRows)
+	}
+}
+
+func TestImportDoesNotSkipDifferentDemoWithSameNameAndMap(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "stats.db")
+	payload := &PlayerStatsExport{Format: PlayerStatsExportFormat, Version: PlayerStatsExportVersion, Demos: []ExportedDemo{
+		{Checksum: "one", FileName: "match", MapName: "de_mirage", Path: "match.dem", DemoDate: "2026-01-01T00:00:00Z", AnalysisVersion: playerStatsAnalysisVersion},
+		{Checksum: "two", FileName: "match", MapName: "de_mirage", Path: "match.dem", DemoDate: "2026-01-02T00:00:00Z", AnalysisVersion: playerStatsAnalysisVersion},
+	}}
+	result, err := ImportPlayerStatsData(ctx, dbPath, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Imported != 2 || result.Skipped != 0 {
+		t.Fatalf("imported=%d skipped=%d, want 2/0", result.Imported, result.Skipped)
 	}
 }
 
@@ -422,7 +477,7 @@ func TestDemosEnabledColumnDefaultsToOne(t *testing.T) {
 	defer db.Close()
 	match := &Match{Checksum: "c1", DemoFilePath: "a.dem", DemoFileName: "a", Date: time.Now(), Source: constants.DemoSourceValve}
 	stats := DemoStats{Players: map[uint64]*DemoPlayerStats{1: {SteamID64: 1, Name: "one", Shots: 10}}, Weapons: map[uint64]map[string]*DemoWeaponStats{}}
-	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+	if err := storeAnalyzedDemo(ctx, db, match, stats, match.Checksum); err != nil {
 		t.Fatal(err)
 	}
 	var enabled int
@@ -447,7 +502,7 @@ func TestQualityWarningAutoDisablesDemoAndAllowsManualOverride(t *testing.T) {
 	}
 	match := &Match{Checksum: "quality1", DemoFilePath: "quality.dem", DemoFileName: "quality", MapName: "de_test", Date: time.Now(), TickRate: 64, Source: constants.DemoSourceValve}
 	stats := DemoStats{Players: players, Weapons: map[uint64]map[string]*DemoWeaponStats{}, Encounters: demoTimingEncounters(5, 10, 240, 140)}
-	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+	if err := storeAnalyzedDemo(ctx, db, match, stats, match.Checksum); err != nil {
 		t.Fatal(err)
 	}
 	var enabled bool
@@ -494,7 +549,7 @@ func TestDeleteDemoRemovesAllStats(t *testing.T) {
 		Encounters: []DemoEncounter{{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 150}},
 		Evidence:   []DemoEvidence{{SteamID64: steamID, VictimID: 2, Kind: "test", Value: 1, Details: "{}"}},
 	}
-	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+	if err := storeAnalyzedDemo(ctx, db, match, stats, match.Checksum); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
@@ -542,7 +597,7 @@ func TestSetPlayerSaved(t *testing.T) {
 	steamID := uint64(76561198000000001)
 	match := &Match{Checksum: "s1", DemoFilePath: "a.dem", DemoFileName: "a", Date: time.Now(), Source: constants.DemoSourceValve}
 	stats := DemoStats{Players: map[uint64]*DemoPlayerStats{steamID: {SteamID64: steamID, Name: "Alice", Rounds: 10, Shots: 10}}, Weapons: map[uint64]map[string]*DemoWeaponStats{}}
-	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+	if err := storeAnalyzedDemo(ctx, db, match, stats, match.Checksum); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
@@ -612,7 +667,7 @@ func TestReportExcludesDisabledDemos(t *testing.T) {
 			Encounters: []DemoEncounter{{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 150, ReactionTimeMS: 100}},
 			Evidence:   []DemoEvidence{{SteamID64: steamID, VictimID: 2, Kind: "test", Value: 1, Details: "{}"}},
 		}
-		if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+		if err := storeAnalyzedDemo(ctx, db, match, stats, match.Checksum); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -660,7 +715,7 @@ func TestSetDemoEnabled(t *testing.T) {
 	}
 	match := &Match{Checksum: "t1", DemoFilePath: "a.dem", DemoFileName: "a", Date: time.Now(), Source: constants.DemoSourceValve}
 	stats := DemoStats{Players: map[uint64]*DemoPlayerStats{1: {SteamID64: 1, Name: "one"}}, Weapons: map[uint64]map[string]*DemoWeaponStats{}}
-	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+	if err := storeAnalyzedDemo(ctx, db, match, stats, match.Checksum); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
@@ -695,12 +750,12 @@ func TestExportImportRoundtrip(t *testing.T) {
 		Encounters: []DemoEncounter{{AttackerSteamID64: steamID, VictimSteamID64: 2, TTDMS: 150, ReactionTimeMS: 100, ConfirmedAngle: 3, WeaponName: "AK-47", Snap: true}},
 		Evidence:   []DemoEvidence{{SteamID64: steamID, VictimID: 2, Kind: "test", Value: 1, Details: "{}"}},
 	}
-	if err := storeAnalyzedDemo(ctx, db, match, stats); err != nil {
+	if err := storeAnalyzedDemo(ctx, db, match, stats, match.Checksum); err != nil {
 		t.Fatal(err)
 	}
 	// disabled demos are excluded from exports
 	match2 := &Match{Checksum: "x2", DemoFilePath: "y.dem", DemoFileName: "y", Date: time.Unix(200, 0), Source: constants.DemoSourceValve}
-	if err := storeAnalyzedDemo(ctx, db, match2, DemoStats{Players: map[uint64]*DemoPlayerStats{}, Weapons: map[uint64]map[string]*DemoWeaponStats{}}); err != nil {
+	if err := storeAnalyzedDemo(ctx, db, match2, DemoStats{Players: map[uint64]*DemoPlayerStats{}, Weapons: map[uint64]map[string]*DemoWeaponStats{}}, match2.Checksum); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`UPDATE demos SET enabled=0 WHERE checksum='x2'`); err != nil {

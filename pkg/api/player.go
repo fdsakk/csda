@@ -155,6 +155,13 @@ func (player *Player) KAST() float32 {
 				continue
 			}
 
+			// A player killed by a teammate, by themselves or by the world is
+			// dead whoever the killer is; only the credit for kills and assists
+			// depends on the kill being against an opponent.
+			if kill.VictimSteamID64 == player.SteamID64 {
+				playerSurvived = false
+			}
+
 			isTeamKill := kill.KillerSide == kill.VictimSide
 			if isTeamKill {
 				continue
@@ -170,11 +177,8 @@ func (player *Player) KAST() float32 {
 				continue
 			}
 
-			if kill.VictimSteamID64 == player.SteamID64 {
-				playerSurvived = false
-				if kill.IsTradeDeath {
-					kastPerRound[round.Number] = true
-				}
+			if kill.VictimSteamID64 == player.SteamID64 && kill.IsTradeDeath {
+				kastPerRound[round.Number] = true
 			}
 		}
 		if playerSurvived {
@@ -701,9 +705,10 @@ func (player *Player) roundCount() int {
 	return len(player.match.Rounds)
 }
 
+// oneVsXClutches returns the clutches of this player against opponentCount opponents.
 func (player *Player) oneVsXClutches(opponentCount int) []*Clutch {
-	clutches := player.Clutches()
-	for _, clutch := range player.match.Clutches {
+	clutches := []*Clutch{}
+	for _, clutch := range player.Clutches() {
 		if clutch.OpponentCount == opponentCount {
 			clutches = append(clutches, clutch)
 		}

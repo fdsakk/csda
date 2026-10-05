@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -18,7 +19,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const playerStatsAnalysisVersion = 6
+// Version 7: statistics are computed per accepted round, encounters follow a
+// strict lifecycle, and demos are identified by the SHA-256 of the whole file.
+const playerStatsAnalysisVersion = 7
 
 type DemoImportError struct {
 	Path  string `json:"path"`
@@ -159,7 +162,7 @@ func ValidateSuspicionConfig(config SuspicionConfig) error {
 		return errors.New("timing thresholds must be greater than 0")
 	}
 	if config.TTDCheaterMS >= config.TTDSuspiciousMS {
-		return errors.New("rifle cheater TTD must be lower than watch TTD")
+		return errors.New("non-AWP cheater TTD must be lower than watch TTD")
 	}
 	if config.AWPTTDCheaterMS >= config.AWPTTDWatchMS {
 		return errors.New("AWP cheater TTD must be lower than watch TTD")
@@ -460,12 +463,14 @@ type analyzedDemoStats struct {
 	path  string
 	match *Match
 	stats DemoStats
-	err   error
+	// contentHash is the SHA-256 of the whole demo file, the demo identity.
+	contentHash string
+	err         error
 }
 
-func analyzeOneDemoForStats(path string, options PlayerStatsBuildOptions) analyzedDemoStats {
+func analyzeOneDemoForStats(ctx context.Context, path string, options PlayerStatsBuildOptions, contentHash string) analyzedDemoStats {
 	collector := newDemoStatsCollector(options.VisibilityConfirmationTicks, options.TrisDir)
-	analyzeOptions := AnalyzeDemoOptions{Source: options.Source, statsCollector: collector}
+	analyzeOptions := AnalyzeDemoOptions{Context: ctx, Source: options.Source, statsCollector: collector}
 	if options.OnDemoProgress != nil {
 		analyzeOptions.onProgress = func(fraction float64) { options.OnDemoProgress(path, fraction) }
 	}
@@ -478,7 +483,34 @@ func analyzeOneDemoForStats(path string, options PlayerStatsBuildOptions) analyz
 		err = fmt.Errorf("no map geometry for %q in %q: refusing to fall back to the inaccurate spotted-flag visibility (add %s/%s.tri or tris.zip, or enable AllowNoGeometry)", mapName, options.TrisDir, options.TrisDir, mapName)
 		return analyzedDemoStats{path: path, err: err}
 	}
-	return analyzedDemoStats{path: path, match: match, stats: collector.result, err: err}
+	return analyzedDemoStats{path: path, match: match, stats: collector.result, contentHash: contentHash, err: err}
+}
+
+// processDemo checks, identifies and analyzes one demo. Whatever goes wrong
+// with the file, including a panic, only fails this demo.
+func processDemo(ctx context.Context, db *sql.DB, path string, options PlayerStatsBuildOptions) (result analyzedDemoStats) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = analyzedDemoStats{path: path, err: fmt.Errorf("unexpected failure while analyzing the demo: %v", r)}
+			fmt.Fprintf(os.Stderr, "panic while processing %q: %v\n%s", path, r, debug.Stack())
+		}
+	}()
+
+	if _, err := demo.GetDemoFromPath(path); err != nil {
+		return analyzedDemoStats{path: path, err: err}
+	}
+	contentHash, err := demo.ContentHash(ctx, path)
+	if err != nil {
+		return analyzedDemoStats{path: path, err: err}
+	}
+	if !options.Force {
+		var version int
+		err := db.QueryRowContext(ctx, `SELECT analysis_version FROM demos WHERE checksum = ?`, contentHash).Scan(&version)
+		if err == nil && version == playerStatsAnalysisVersion {
+			return analyzedDemoStats{path: path}
+		}
+	}
+	return analyzeOneDemoForStats(ctx, path, options, contentHash)
 }
 
 func BuildPlayerStatsDatabase(ctx context.Context, options PlayerStatsBuildOptions) (*PlayerStatsBuildResult, error) {
@@ -519,16 +551,7 @@ func BuildPlayerStatsDatabase(ctx context.Context, options PlayerStatsBuildOptio
 					return
 				default:
 				}
-				info, infoErr := demo.GetDemoFromPath(path)
-				if infoErr == nil && !options.Force {
-					var version int
-					err := db.QueryRowContext(ctx, `SELECT analysis_version FROM demos WHERE checksum = ?`, info.Checksum).Scan(&version)
-					if err == nil && version == playerStatsAnalysisVersion {
-						results <- analyzedDemoStats{path: path}
-						continue
-					}
-				}
-				results <- analyzeOneDemoForStats(path, options)
+				results <- processDemo(ctx, db, path, options)
 			}
 		}()
 	}
@@ -554,6 +577,10 @@ func BuildPlayerStatsDatabase(ctx context.Context, options PlayerStatsBuildOptio
 		if options.OnDemoProgress != nil {
 			options.OnDemoProgress(analyzed.path, 1)
 		}
+		if errors.Is(analyzed.err, context.Canceled) || errors.Is(analyzed.err, context.DeadlineExceeded) {
+			// Interrupted, not broken: the demo stays unanalyzed.
+			continue
+		}
 		if analyzed.err != nil {
 			result.Failed++
 			result.Errors = append(result.Errors, DemoImportError{Path: analyzed.path, Error: analyzed.err.Error()})
@@ -563,7 +590,7 @@ func BuildPlayerStatsDatabase(ctx context.Context, options PlayerStatsBuildOptio
 			result.Skipped++
 			continue
 		}
-		if err := storeAnalyzedDemo(ctx, db, analyzed.match, analyzed.stats); err != nil {
+		if err := storeAnalyzedDemo(ctx, db, analyzed.match, analyzed.stats, analyzed.contentHash); err != nil {
 			result.Failed++
 			result.Errors = append(result.Errors, DemoImportError{Path: analyzed.path, Error: err.Error()})
 			continue
@@ -576,23 +603,29 @@ func BuildPlayerStatsDatabase(ctx context.Context, options PlayerStatsBuildOptio
 	return result, nil
 }
 
-func storeAnalyzedDemo(ctx context.Context, db *sql.DB, match *Match, stats DemoStats) error {
+// storeAnalyzedDemo saves one analysis. contentHash (SHA-256 of the whole file)
+// is the demo identity: only the same bytes replace a previous analysis, so two
+// different matches never overwrite each other, whatever their file name or map.
+func storeAnalyzedDemo(ctx context.Context, db *sql.DB, match *Match, stats DemoStats, contentHash string) error {
+	if contentHash == "" {
+		return errors.New("demo content hash is required")
+	}
 	quality := assessDemoQuality(stats.Encounters)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	// A re-analyzed demo replaces the previous analysis. Match by checksum,
-	// but also by file name + map: the header checksum includes the file size,
-	// so the same demo re-uploaded through a lossy path (e.g. a different
-	// machine) can carry a different checksum and would otherwise duplicate.
-	if _, err = tx.ExecContext(ctx, `DELETE FROM demos WHERE checksum = ? OR (file_name = ? AND map_name = ?)`, match.Checksum, match.DemoFileName, match.MapName); err != nil {
+	// A re-analyzed demo replaces the previous analysis of the same bytes. Rows
+	// stored before content hashes existed carry the weak header checksum
+	// (match.Checksum); they are replaced only when that checksum, the file name
+	// and the map all agree, so unrelated matches are never merged.
+	if _, err = tx.ExecContext(ctx, `DELETE FROM demos WHERE checksum = ? OR (checksum = ? AND file_name = ? AND map_name = ?)`, contentHash, match.Checksum, match.DemoFileName, match.MapName); err != nil {
 		return err
 	}
 	enabled := quality.Status != demoQualityStatusWarning
 	res, err := tx.ExecContext(ctx, `INSERT INTO demos(checksum,path,file_name,map_name,demo_date,tick_rate,build_number,source,analysis_version,imported_at,enabled,quality_status,quality_reason,origin) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'analyzed')`,
-		match.Checksum, match.DemoFilePath, match.DemoFileName, match.MapName, match.Date.UTC().Format(time.RFC3339), match.TickRate, match.BuildNumber, match.Source.String(), playerStatsAnalysisVersion, time.Now().UTC().Format(time.RFC3339), enabled, quality.Status, quality.Reason)
+		contentHash, match.DemoFilePath, match.DemoFileName, match.MapName, match.Date.UTC().Format(time.RFC3339), match.TickRate, match.BuildNumber, match.Source.String(), playerStatsAnalysisVersion, time.Now().UTC().Format(time.RFC3339), enabled, quality.Status, quality.Reason)
 	if err != nil {
 		return err
 	}

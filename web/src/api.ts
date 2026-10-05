@@ -87,6 +87,7 @@ export type Player = {
   reactionP10Ms: number;
   crosshairMedianAngle: number;
   firstShotMedianAngle: number;
+  firstShotAngleSamples: number;
   saved: boolean;
   banned: boolean;
   eligible: boolean;

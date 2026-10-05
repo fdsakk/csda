@@ -106,15 +106,15 @@ function BarRow({ label, detail, value, color, reference }: { label: string; det
 }
 
 const RULE_LABEL: Record<string, string> = {
-  ttd_score: 'Rifle TTD evidence',
+  ttd_score: 'Non-AWP TTD evidence',
   awp_ttd_score: 'AWP TTD evidence',
-  reaction_score: 'Rifle reaction evidence',
+  reaction_score: 'Non-AWP reaction evidence',
   head_hit_score: 'Head-hit evidence',
   accuracy_score: 'Accuracy evidence',
   kd_score: 'K/D support',
-  ttd: 'Rifle TTD',
+  ttd: 'Non-AWP TTD',
   awp_ttd: 'AWP TTD',
-  reaction: 'Rifle reaction',
+  reaction: 'Non-AWP reaction',
   head_hit_rate: 'Head-hit rate',
   accuracy: 'Accuracy',
   kd: 'K/D',
@@ -145,15 +145,15 @@ export function PlayerDetails({ player, weapons, scoreMode }: { player: Player; 
     : [];
   const aimStats: [string, string][] = [
     ['Crosshair @ exposure', `${player.crosshairMedianAngle.toFixed(1)}°`],
-    ['First shot error', `${player.firstShotMedianAngle.toFixed(1)}°`],
+    ['First shot error', player.firstShotAngleSamples ? `${player.firstShotMedianAngle.toFixed(1)}°` : '—'],
     ['Unspotted damage', pct(player.unspottedDamageRate)],
     ['Smoke / wall kills', `${player.smokeKills} / ${player.wallKills}`],
   ];
   const timingStats: [string, string][] = [
-    ['TTD (rifle)', ms(player.nonAwpTtdWeightedMs, player.nonAwpTtdSamples)],
+    ['TTD (non-AWP)', ms(player.nonAwpTtdWeightedMs, player.nonAwpTtdSamples)],
     ['TTD (AWP)', ms(player.awpTtdWeightedMs, player.awpTtdSamples)],
     ['TTD p10 (all)', ms(player.ttdP10Ms, player.ttdSamples)],
-    ['Reaction (rifle)', ms(player.nonAwpReactionWeightedMs, player.nonAwpReactionSamples)],
+    ['Reaction (non-AWP)', ms(player.nonAwpReactionWeightedMs, player.nonAwpReactionSamples)],
   ];
   return (
     <TooltipProvider>
@@ -163,7 +163,7 @@ export function PlayerDetails({ player, weapons, scoreMode }: { player: Player; 
           title="Time to damage"
           bins={player.ttdHistogram}
           samples={player.ttdSamples}
-          medianMs={player.ttdWeightedMs}
+          medianMs={player.ttdMedianMs}
           p10Ms={player.ttdP10Ms}
           color="var(--chart-1)"
           className="lg:col-start-1 lg:row-start-1"
@@ -173,7 +173,7 @@ export function PlayerDetails({ player, weapons, scoreMode }: { player: Player; 
           title="Reaction time (first shot)"
           bins={player.reactionHistogram}
           samples={player.reactionSamples}
-          medianMs={player.reactionWeightedMs}
+          medianMs={player.reactionMedianMs}
           p10Ms={player.reactionP10Ms}
           color="var(--chart-2)"
           className="lg:col-start-2 lg:row-start-1"

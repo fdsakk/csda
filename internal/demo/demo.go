@@ -100,7 +100,25 @@ func getDateFromMatchTime(matchTime uint32) time.Time {
 	return time.Unix(int64(matchTime), 0)
 }
 
-func GetDemoFromPath(demoPath string) (*Demo, error) {
+// ErrInvalidDemo is returned when a file is not a readable CS demo (empty,
+// truncated or with a corrupted header).
+var ErrInvalidDemo = errors.New("invalid or corrupted demo file")
+
+// minDemoSize is the size of the filestamp plus the smallest fixed header
+// (Source 2: 8 bytes of stamp + 8 bytes skipped), anything shorter cannot be
+// a demo.
+const minDemoSize = 16
+
+func GetDemoFromPath(demoPath string) (demo *Demo, err error) {
+	// The bit reader reports I/O errors by panicking, e.g. io.EOF on an empty
+	// or truncated file. A bad demo must fail its own analysis, not the process.
+	defer func() {
+		if r := recover(); r != nil {
+			demo = nil
+			err = fmt.Errorf("%w: unable to read the header of %q (%v)", ErrInvalidDemo, demoPath, r)
+		}
+	}()
+
 	file, err := os.Open(demoPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -115,8 +133,15 @@ func GetDemoFromPath(demoPath string) (*Demo, error) {
 		return nil, err
 	}
 
+	if stats.IsDir() || stats.Size() < minDemoSize {
+		return nil, fmt.Errorf("%w: %q is too small to be a demo (%d bytes)", ErrInvalidDemo, demoPath, stats.Size())
+	}
+
 	br := bitread.NewLargeBitReader(file)
 	filestamp := br.ReadCString(8)
+	if filestamp != "PBDEMS2" && filestamp != "HL2DEMO" {
+		return nil, fmt.Errorf("%w: %q has an unknown file signature", ErrInvalidDemo, demoPath)
+	}
 	isSource2 := filestamp == "PBDEMS2"
 
 	var checksum string

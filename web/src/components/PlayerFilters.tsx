@@ -77,8 +77,8 @@ export function FiltersPanel({ filters, onChange }: { filters: TableFilters; onC
         <ThresholdSelect label="Accuracy" value={filters.minAccuracy} options={[0.15, 0.2, 0.25, 0.3]} format={(v) => `≥ ${Math.round(v * 100)}%`} onChange={(v) => set('minAccuracy', v)} />
         <ThresholdSelect label="Head hit rate" value={filters.minHeadHit} options={[0.2, 0.3, 0.4, 0.5]} format={(v) => `≥ ${Math.round(v * 100)}%`} onChange={(v) => set('minHeadHit', v)} />
         <ThresholdSelect label="HS kill rate" value={filters.minHsKill} options={[0.4, 0.6, 0.8]} format={(v) => `≥ ${Math.round(v * 100)}%`} onChange={(v) => set('minHsKill', v)} />
-        <ThresholdSelect label="TTD (rifle)" value={filters.maxTtdMs} options={[450, 400, 350, 300]} format={(v) => `≤ ${v} ms`} onChange={(v) => set('maxTtdMs', v)} />
-        <ThresholdSelect label="Reaction (rifle)" value={filters.maxReactionMs} options={[350, 300, 250, 200]} format={(v) => `≤ ${v} ms`} onChange={(v) => set('maxReactionMs', v)} />
+        <ThresholdSelect label="TTD (non-AWP)" value={filters.maxTtdMs} options={[450, 400, 350, 300]} format={(v) => `≤ ${v} ms`} onChange={(v) => set('maxTtdMs', v)} />
+        <ThresholdSelect label="Reaction (non-AWP)" value={filters.maxReactionMs} options={[350, 300, 250, 200]} format={(v) => `≤ ${v} ms`} onChange={(v) => set('maxReactionMs', v)} />
         <ThresholdSelect label="K/D" value={filters.minKd} options={[1, 1.5, 2, 3]} format={(v) => `≥ ${v}`} onChange={(v) => set('minKd', v)} />
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">

@@ -70,31 +70,33 @@ type PlayerStatsReportRow struct {
 	NonAWPReactionSamples    int      `json:"nonAwpReactionSamples"`
 	NonAWPReactionWeightedMS float64  `json:"nonAwpReactionWeightedMs"`
 	// 20 bins of 50ms across 0–1000ms, for the UI distribution charts.
-	TTDHistogram         []int                 `json:"ttdHistogram"`
-	ReactionHistogram    []int                 `json:"reactionHistogram"`
-	ReactionSamples      int                   `json:"reactionSamples"`
-	ReactionMedianMS     float64               `json:"reactionMedianMs"`
-	ReactionWeightedMS   float64               `json:"reactionWeightedMs"`
-	ReactionP10MS        float64               `json:"reactionP10Ms"`
-	CrosshairMedianAngle float64               `json:"crosshairMedianAngle"`
-	FirstShotMedianAngle float64               `json:"firstShotMedianAngle"`
-	MovingShots          int                   `json:"movingShots"`
-	MovingHitRate        float64               `json:"movingHitRate"`
-	AirborneShots        int                   `json:"airborneShots"`
-	AirborneHitRate      float64               `json:"airborneHitRate"`
-	FlashedShots         int                   `json:"flashedShots"`
-	FlashedHitRate       float64               `json:"flashedHitRate"`
-	ScopedShots          int                   `json:"scopedShots"`
-	ScopedHitRate        float64               `json:"scopedHitRate"`
-	Saved                bool                  `json:"saved"`
-	Banned               bool                  `json:"banned"`
-	Eligible             bool                  `json:"eligible"`
-	Status               string                `json:"status"`
-	SuspicionScore       float64               `json:"suspicionScore"`
-	TimingScore          float64               `json:"timingScore"`
-	PrecisionScore       float64               `json:"precisionScore"`
-	PerformanceScore     float64               `json:"performanceScore"`
-	TriggeredRules       []PlayerSuspicionRule `json:"triggeredRules"`
+	TTDHistogram         []int   `json:"ttdHistogram"`
+	ReactionHistogram    []int   `json:"reactionHistogram"`
+	ReactionSamples      int     `json:"reactionSamples"`
+	ReactionMedianMS     float64 `json:"reactionMedianMs"`
+	ReactionWeightedMS   float64 `json:"reactionWeightedMs"`
+	ReactionP10MS        float64 `json:"reactionP10Ms"`
+	CrosshairMedianAngle float64 `json:"crosshairMedianAngle"`
+	FirstShotMedianAngle float64 `json:"firstShotMedianAngle"`
+	// Encounters with an attributed first shot; the angle is undefined (not 0°) without any.
+	FirstShotAngleSamples int                   `json:"firstShotAngleSamples"`
+	MovingShots           int                   `json:"movingShots"`
+	MovingHitRate         float64               `json:"movingHitRate"`
+	AirborneShots         int                   `json:"airborneShots"`
+	AirborneHitRate       float64               `json:"airborneHitRate"`
+	FlashedShots          int                   `json:"flashedShots"`
+	FlashedHitRate        float64               `json:"flashedHitRate"`
+	ScopedShots           int                   `json:"scopedShots"`
+	ScopedHitRate         float64               `json:"scopedHitRate"`
+	Saved                 bool                  `json:"saved"`
+	Banned                bool                  `json:"banned"`
+	Eligible              bool                  `json:"eligible"`
+	Status                string                `json:"status"`
+	SuspicionScore        float64               `json:"suspicionScore"`
+	TimingScore           float64               `json:"timingScore"`
+	PrecisionScore        float64               `json:"precisionScore"`
+	PerformanceScore      float64               `json:"performanceScore"`
+	TriggeredRules        []PlayerSuspicionRule `json:"triggeredRules"`
 }
 
 func (row PlayerStatsReportRow) MarshalJSON() ([]byte, error) {
@@ -194,6 +196,10 @@ func histogramMS(values []float64) []int {
 	return bins
 }
 
+// firstShotAngleAnalysisVersion is the first analysis version that stores -1
+// instead of 0 when an encounter has no attributed first shot.
+const firstShotAngleAnalysisVersion = 7
+
 func percentile(values []float64, p float64) float64 {
 	if len(values) == 0 {
 		return 0
@@ -270,7 +276,9 @@ func (s *playerEncounterSamples) add(demoID int64, rounds int, ttd, reaction, cr
 		s.ttd = append(s.ttd, ttd)
 		appendDemoSample(s.ttdByDemo, demoID, rounds, ttd)
 		s.crosshairAngles = append(s.crosshairAngles, crosshairAngle)
-		if firstShotAngle > 0 {
+		// A negative angle marks an encounter without an attributed first
+		// shot; 0° is a valid, perfect aim.
+		if firstShotAngle >= 0 {
 			s.firstShotAngles = append(s.firstShotAngles, firstShotAngle)
 		}
 		if ttd <= 190 {
@@ -328,6 +336,7 @@ func (s *playerEncounterSamples) apply(row *PlayerStatsReportRow) {
 	}
 	row.CrosshairMedianAngle = percentile(s.crosshairAngles, .5)
 	row.FirstShotMedianAngle = percentile(s.firstShotAngles, .5)
+	row.FirstShotAngleSamples = len(s.firstShotAngles)
 
 	row.ReactionSamples = len(s.reaction)
 	row.ReactionMedianMS = percentile(s.reaction, .5)
@@ -344,7 +353,7 @@ func (s *playerEncounterSamples) apply(row *PlayerStatsReportRow) {
 // collectEncounterSamples reads every enabled demo's encounters once and
 // groups them per attacker, instead of one query per player.
 func collectEncounterSamples(ctx context.Context, db *sql.DB) (map[uint64]*playerEncounterSamples, error) {
-	rows, err := db.QueryContext(ctx, `SELECT e.attacker_steam_id,e.demo_id,s.rounds,e.ttd_ms,e.reaction_time_ms,e.confirmed_angle,e.first_shot_angle,e.weapon_name FROM encounters e JOIN player_demo_stats s ON s.demo_id=e.demo_id AND s.steam_id=e.attacker_steam_id JOIN demos d ON d.id=e.demo_id AND d.enabled=1`)
+	rows, err := db.QueryContext(ctx, `SELECT e.attacker_steam_id,e.demo_id,s.rounds,e.ttd_ms,e.reaction_time_ms,e.confirmed_angle,e.first_shot_angle,e.weapon_name,d.analysis_version FROM encounters e JOIN player_demo_stats s ON s.demo_id=e.demo_id AND s.steam_id=e.attacker_steam_id JOIN demos d ON d.id=e.demo_id AND d.enabled=1`)
 	if err != nil {
 		return nil, err
 	}
@@ -357,8 +366,13 @@ func collectEncounterSamples(ctx context.Context, db *sql.DB) (map[uint64]*playe
 		var rounds int
 		var ttd, reaction, crosshairAngle, firstShotAngle float64
 		var weaponName string
-		if err := rows.Scan(&steamID, &demoID, &rounds, &ttd, &reaction, &crosshairAngle, &firstShotAngle, &weaponName); err != nil {
+		var analysisVersion int
+		if err := rows.Scan(&steamID, &demoID, &rounds, &ttd, &reaction, &crosshairAngle, &firstShotAngle, &weaponName, &analysisVersion); err != nil {
 			return nil, err
+		}
+		if analysisVersion < firstShotAngleAnalysisVersion && firstShotAngle == 0 {
+			// Older analyses stored 0 for "no first shot attributed".
+			firstShotAngle = -1
 		}
 		samples := byPlayer[steamID]
 		if samples == nil {

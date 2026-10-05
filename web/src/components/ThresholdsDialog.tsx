@@ -65,7 +65,7 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    title: 'Rifle timing anchors',
+    title: 'Non-AWP timing anchors',
     description: 'Non-AWP weighted averages. Lower values produce stronger timing evidence.',
     modes: ['score'],
     fields: [
@@ -107,7 +107,7 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    title: 'Rifle timing thresholds',
+    title: 'Non-AWP timing thresholds',
     description: 'Non-AWP weighted averages. Below the watch bound → Watch, below the cheater bound → Cheater.',
     modes: ['manual'],
     fields: [

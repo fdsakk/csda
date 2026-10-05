@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 	"strconv"
 
 	"github.com/fdsakk/csda/internal/converters"
@@ -65,7 +67,10 @@ type Analyzer struct {
 type AnalyzeDemoOptions struct {
 	IncludePositions bool
 	Source           constants.DemoSource
-	statsCollector   *demoStatsCollector
+	// Context, when set, aborts the analysis once it is done. The parser is
+	// stopped between two frames and the context error is returned.
+	Context        context.Context
+	statsCollector *demoStatsCollector
 	// onProgress, when set, receives the parse progress as a 0..1 fraction of
 	// demo file bytes consumed.
 	onProgress func(float64)
@@ -93,7 +98,26 @@ func (r *progressReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func analyzeDemo(demoPath string, options AnalyzeDemoOptions) (*Match, error) {
+// analyzeDemo turns a panic raised while reading a corrupted demo into an
+// error, so that a bad file only fails its own analysis.
+func analyzeDemo(demoPath string, options AnalyzeDemoOptions) (match *Match, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			match = nil
+			err = fmt.Errorf("unable to analyze %q, the demo is probably corrupted: %v", demoPath, r)
+			fmt.Fprintf(os.Stderr, "panic while analyzing %q: %v\n%s", demoPath, r, debug.Stack())
+		}
+	}()
+
+	return analyzeDemoUnsafe(demoPath, options)
+}
+
+func analyzeDemoUnsafe(demoPath string, options AnalyzeDemoOptions) (*Match, error) {
+	if options.Context != nil {
+		if err := options.Context.Err(); err != nil {
+			return nil, err
+		}
+	}
 	if options.Source != "" {
 		err := ValidateDemoSource(options.Source)
 		if err != nil {
@@ -178,6 +202,18 @@ func analyzeDemo(demoPath string, options AnalyzeDemoOptions) (*Match, error) {
 	}
 
 	analyzer.registerCommonHandlers(options.IncludePositions)
+	if options.Context != nil {
+		// Cancel from inside the parsing goroutine: the parser is not safe to
+		// be torn down while it is dispatching events.
+		done := options.Context.Done()
+		parser.RegisterEventHandler(func(events.FrameDone) {
+			select {
+			case <-done:
+				parser.Cancel()
+			default:
+			}
+		})
+	}
 
 	switch source {
 	case constants.DemoSourceFaceIt:
@@ -224,6 +260,9 @@ func analyzeDemo(demoPath string, options AnalyzeDemoOptions) (*Match, error) {
 	}
 
 	err = parser.ParseToEnd()
+	if options.Context != nil && options.Context.Err() != nil {
+		return nil, options.Context.Err()
+	}
 	// Do not stop if the demo is corrupted, usually the error occurs at the end of the parsing.
 	// Depending on how far we were able to parse the demo we may still have data.
 	isCorruptedDemo := errors.Is(err, dem.ErrUnexpectedEndOfDemo)
@@ -320,6 +359,9 @@ func (analyzer *Analyzer) reset() {
 	analyzer.clutch1 = nil
 	analyzer.clutch2 = nil
 	analyzer.match.reset()
+	if analyzer.playerStatsCollector != nil {
+		analyzer.playerStatsCollector.reset()
+	}
 	analyzer.updateTeamNames()
 	for _, player := range analyzer.match.PlayersBySteamID {
 		player.reset()
@@ -343,6 +385,9 @@ func (analyzer *Analyzer) reset() {
 
 func (analyzer *Analyzer) resetCurrentRound() {
 	analyzer.match.resetRound(analyzer.currentRound.Number)
+	if analyzer.playerStatsCollector != nil {
+		analyzer.playerStatsCollector.resetRound(analyzer.currentRound.Number)
+	}
 	analyzer.createPlayersEconomies()
 }
 

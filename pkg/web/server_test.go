@@ -8,8 +8,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/fdsakk/csda/pkg/api"
 )
@@ -336,4 +338,125 @@ func TestImportValidation(t *testing.T) {
 	if response := do(server, http.MethodPost, "/api/import", []byte(`{"format":"wrong","version":1}`)); response.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
+}
+
+func uploadDemo(t *testing.T, server *Server, name string, content []byte) Job {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, _ := writer.CreateFormFile("demos", name)
+	_, _ = part.Write(content)
+	_ = writer.Close()
+	request := httptest.NewRequest(http.MethodPost, "/api/uploads", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("upload status=%d body=%s", response.Code, response.Body.String())
+	}
+	var job Job
+	if err := json.Unmarshal(response.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	return job
+}
+
+func waitForJob(t *testing.T, server *Server, id string) Job {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, job := range server.sortedJobs() {
+			if job.ID == id && (job.Status == JobCompleted || job.Status == JobFailed) {
+				return job
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("job %s did not finish", id)
+	return Job{}
+}
+
+func TestCorruptedDemosFailOnlyTheirJob(t *testing.T) {
+	root := t.TempDir()
+	uploadsPath := filepath.Join(root, "uploads")
+	server, err := NewServer(Options{DatabasePath: filepath.Join(root, "stats.db"), UploadsPath: uploadsPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(server.Close)
+
+	for name, content := range map[string][]byte{
+		"empty.dem":     nil,
+		"tiny.dem":      []byte("PBDEMS2"),
+		"random.dem":    bytes.Repeat([]byte("garbage!"), 64),
+		"truncated.dem": append([]byte("HL2DEMO\x00"), make([]byte, 40)...),
+	} {
+		job := waitForJob(t, server, uploadDemo(t, server, name, content).ID)
+		if job.Status != JobFailed || job.Result == nil || job.Result.Failed != 1 || len(job.Result.Errors) != 1 {
+			t.Fatalf("%s: job=%+v result=%+v, want one failed demo", name, job, job.Result)
+		}
+		// The folder is removed right after the job is marked as finished.
+		folder := filepath.Join(uploadsPath, job.ID)
+		removed := false
+		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			if _, err := os.Stat(folder); os.IsNotExist(err) {
+				removed = true
+				break
+			}
+		}
+		if !removed {
+			t.Fatalf("%s: upload folder was not removed", name)
+		}
+	}
+	// The server keeps serving after bad files.
+	if response := do(server, http.MethodGet, "/api/health", nil); response.Code != http.StatusOK {
+		t.Fatalf("health status=%d", response.Code)
+	}
+}
+
+func TestStartupRemovesOrphanedUploadFolders(t *testing.T) {
+	root := t.TempDir()
+	uploadsPath := filepath.Join(root, "uploads")
+	orphan := filepath.Join(uploadsPath, "0123456789abcdef")
+	other := filepath.Join(uploadsPath, "notes")
+	for _, dir := range []string{orphan, other} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "file"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server, err := NewServer(Options{DatabasePath: filepath.Join(root, "stats.db"), UploadsPath: uploadsPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Fatalf("orphaned upload folder survived startup (%v)", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("foreign folder must be kept: %v", err)
+	}
+}
+
+func TestConcurrentUploadsAndJobListing(t *testing.T) {
+	server := newTestServer(t)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			uploadDemo(t, server, "empty.dem", nil)
+		}()
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 20; j++ {
+				if response := do(server, http.MethodGet, "/api/jobs", nil); response.Code != http.StatusOK {
+					t.Errorf("jobs status=%d", response.Code)
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }

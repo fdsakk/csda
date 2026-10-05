@@ -48,6 +48,7 @@ type encounterState struct {
 }
 
 type trackedShot struct {
+	round    int
 	tick     int
 	weaponID string
 	hit      bool
@@ -143,6 +144,16 @@ type visCacheEntry struct {
 	visible bool
 }
 
+// roundStats holds everything the collector measured during one round. Keeping
+// it per round lets a round that is later discarded (backup restore, incomplete
+// round, knife/warmup restart) be dropped without leaving traces in the totals.
+type roundStats struct {
+	players    map[uint64]*DemoPlayerStats
+	weapons    map[uint64]map[string]*DemoWeaponStats
+	encounters []DemoEncounter
+	evidence   []DemoEvidence
+}
+
 type demoStatsCollector struct {
 	confirmationTicks int
 	trisDir           string
@@ -156,33 +167,79 @@ type demoStatsCollector struct {
 	encounters        map[encounterKey]*encounterState
 	shots             map[uint64][]*trackedShot
 	pendingDamage     map[uint64][]*Damage
-	result            DemoStats
+	// liveRound is the round the live state above belongs to; the state is
+	// dropped as soon as the analyzer moves on to another round.
+	liveRound     *Round
+	lastFrameTick int
+	rounds        map[int]*roundStats
+	names         map[uint64]string
+	result        DemoStats
 }
 
 func newDemoStatsCollector(confirmationTicks int, trisDir string) *demoStatsCollector {
 	if confirmationTicks < 1 {
 		confirmationTicks = 3
 	}
-	return &demoStatsCollector{
+	c := &demoStatsCollector{
 		confirmationTicks: confirmationTicks,
 		trisDir:           trisDir,
-		visCache:          make(map[encounterKey]visCacheEntry),
-		frames:            make(map[uint64]playerFrameState),
-		encounters:        make(map[encounterKey]*encounterState),
-		shots:             make(map[uint64][]*trackedShot),
-		pendingDamage:     make(map[uint64][]*Damage),
-		result: DemoStats{
-			Players: make(map[uint64]*DemoPlayerStats),
-			Weapons: make(map[uint64]map[string]*DemoWeaponStats),
-		},
+		rounds:            make(map[int]*roundStats),
+		names:             make(map[uint64]string),
+	}
+	c.resetLiveState()
+	return c
+}
+
+func (c *demoStatsCollector) resetLiveState() {
+	c.lastFrameTick = 0
+	c.smokes = nil
+	c.occluders = nil
+	c.visCache = make(map[encounterKey]visCacheEntry)
+	c.frames = make(map[uint64]playerFrameState)
+	c.encounters = make(map[encounterKey]*encounterState)
+	c.shots = make(map[uint64][]*trackedShot)
+	c.pendingDamage = make(map[uint64][]*Damage)
+}
+
+// syncRound drops the live state (running encounters, shot buffers, smokes)
+// when the analyzer started a new round.
+func (c *demoStatsCollector) syncRound(analyzer *Analyzer) {
+	if c.liveRound != analyzer.currentRound {
+		c.liveRound = analyzer.currentRound
+		c.resetLiveState()
 	}
 }
 
-func (c *demoStatsCollector) weapon(id uint64, name constants.WeaponName) *DemoWeaponStats {
-	weapons := c.result.Weapons[id]
+// reset forgets everything, used when the analyzer restarts the whole match.
+func (c *demoStatsCollector) reset() {
+	c.rounds = make(map[int]*roundStats)
+	c.resetLiveState()
+}
+
+// resetRound forgets one round, used when the round is restored from a backup.
+func (c *demoStatsCollector) resetRound(roundNumber int) {
+	delete(c.rounds, roundNumber)
+	c.resetLiveState()
+}
+
+func (c *demoStatsCollector) round(number int) *roundStats {
+	round := c.rounds[number]
+	if round == nil {
+		round = &roundStats{
+			players: make(map[uint64]*DemoPlayerStats),
+			weapons: make(map[uint64]map[string]*DemoWeaponStats),
+		}
+		c.rounds[number] = round
+	}
+	return round
+}
+
+func (c *demoStatsCollector) weapon(roundNumber int, id uint64, name constants.WeaponName) *DemoWeaponStats {
+	round := c.round(roundNumber)
+	weapons := round.weapons[id]
 	if weapons == nil {
 		weapons = make(map[string]*DemoWeaponStats)
-		c.result.Weapons[id] = weapons
+		round.weapons[id] = weapons
 	}
 	key := name.String()
 	stats := weapons[key]
@@ -193,13 +250,15 @@ func (c *demoStatsCollector) weapon(id uint64, name constants.WeaponName) *DemoW
 	return stats
 }
 
-func (c *demoStatsCollector) player(id uint64, name string) *DemoPlayerStats {
-	stats := c.result.Players[id]
+func (c *demoStatsCollector) player(roundNumber int, id uint64, name string) *DemoPlayerStats {
+	if name != "" {
+		c.names[id] = name
+	}
+	round := c.round(roundNumber)
+	stats := round.players[id]
 	if stats == nil {
-		stats = &DemoPlayerStats{SteamID64: id, Name: name}
-		c.result.Players[id] = stats
-	} else if name != "" {
-		stats.Name = name
+		stats = &DemoPlayerStats{SteamID64: id}
+		round.players[id] = stats
 	}
 	return stats
 }
@@ -278,6 +337,7 @@ const (
 )
 
 func (c *demoStatsCollector) onSmokeStart(analyzer *Analyzer, entityID int, position r3.Vector) {
+	c.syncRound(analyzer)
 	lifetimeTicks := int(smokeLifetimeSeconds * analyzer.parser.TickRate())
 	c.smokes = append(c.smokes, activeSmoke{
 		entityID:   entityID,
@@ -314,6 +374,7 @@ func (c *demoStatsCollector) visible(a, t playerFrameState, attacker, target *co
 }
 
 func (c *demoStatsCollector) onFrame(analyzer *Analyzer) {
+	c.syncRound(analyzer)
 	if !c.visLoadAttempted {
 		c.visLoadAttempted = true
 		engine, err := vis.LoadEngine(c.trisDir, analyzer.match.MapName)
@@ -328,6 +389,12 @@ func (c *demoStatsCollector) onFrame(analyzer *Analyzer) {
 		c.graceTicks = max(3, int(analyzer.parser.TickRate()/2))
 	}
 	tick := analyzer.currentTick()
+	// A tick can be followed by extra frames; sample each tick once so that
+	// consecutive samples are consecutive ticks.
+	if tick == c.lastFrameTick {
+		return
+	}
+	c.lastFrameTick = tick
 	if len(c.smokes) > 0 {
 		remaining := c.smokes[:0]
 		for _, smoke := range c.smokes {
@@ -349,55 +416,94 @@ func (c *demoStatsCollector) onFrame(analyzer *Analyzer) {
 		if p.SteamID64 == 0 {
 			continue
 		}
-		state := playerState(p)
-		current[p.SteamID64] = state
+		current[p.SteamID64] = playerState(p)
 		byID[p.SteamID64] = p
-		c.player(p.SteamID64, p.Name)
+		c.names[p.SteamID64] = p.Name
 	}
 
 	for attackerID, attacker := range byID {
 		a := current[attackerID]
-		if !a.alive || a.flashed {
-			continue
-		}
 		for targetID, target := range byID {
 			t := current[targetID]
-			if attackerID == targetID || !t.alive || a.team == t.team {
+			if attackerID == targetID || a.team == t.team {
 				continue
 			}
-			key := encounterKey{attacker: attackerID, target: targetID}
-			state := c.encounters[key]
-			// Raycasts are the analysis hot spot; reuse each pair's result for
-			// one extra tick (~16ms error on encounter anchors, well below the
-			// 3-tick confirmation window).
-			spotted, cached := false, false
-			if entry, ok := c.visCache[key]; ok && tick-entry.tick < 2 {
-				spotted, cached = entry.visible, true
-			}
-			if !cached {
-				spotted = c.visible(a, t, attacker, target)
-				c.visCache[key] = visCacheEntry{tick: tick, visible: spotted}
-			}
-			if spotted {
-				if state == nil || state.unspottedTicks >= c.graceTicks {
-					state = &encounterState{firstTick: tick, firstShotTick: -1, firstAngle: angularError(a, t), distance: distanceMeters(a, t)}
-					c.encounters[key] = state
-				}
-				state.unspottedTicks = 0
-				state.spottedTicks++
-				if state.spottedTicks == c.confirmationTicks {
-					state.confirmedTick = tick
-					state.confirmedAngle = angularError(a, t)
-				}
-			} else if state != nil {
-				state.unspottedTicks++
-				if state.unspottedTicks >= c.graceTicks {
-					delete(c.encounters, key)
-				}
-			}
+			c.observePair(encounterKey{attacker: attackerID, target: targetID}, tick, a, t, func() bool {
+				return c.visible(a, t, attacker, target)
+			})
+		}
+	}
+	// A player that left the server ends all of its encounters.
+	for key := range c.encounters {
+		if _, ok := current[key.attacker]; !ok {
+			c.dropEncounter(key)
+		} else if _, ok := current[key.target]; !ok {
+			c.dropEncounter(key)
 		}
 	}
 	c.frames = current
+}
+
+// observePair advances the encounter of one attacker/target pair for the
+// current frame. visible reports whether the attacker sees the target; it is the
+// expensive part and is only evaluated when the pair can actually see anything.
+func (c *demoStatsCollector) observePair(key encounterKey, tick int, a, t playerFrameState, visible func() bool) {
+	if !a.alive || !t.alive {
+		// A dead player ends the encounter; it must not carry its state over
+		// to the next life.
+		c.dropEncounter(key)
+		return
+	}
+	// A flashed attacker cannot see the target: that is plain occlusion,
+	// handled by the same grace period as a wall.
+	spotted := false
+	if !a.flashed {
+		// Raycasts are the analysis hot spot; reuse each pair's result for one
+		// extra tick (~16ms error on encounter anchors, well below the
+		// confirmation window).
+		if entry, ok := c.visCache[key]; ok && tick-entry.tick < 2 {
+			spotted = entry.visible
+		} else {
+			spotted = visible()
+			c.visCache[key] = visCacheEntry{tick: tick, visible: spotted}
+		}
+	}
+	c.observeEncounter(key, tick, spotted, a, t)
+}
+
+func (c *demoStatsCollector) dropEncounter(key encounterKey) {
+	delete(c.encounters, key)
+	delete(c.visCache, key)
+}
+
+// observeEncounter feeds one visibility sample of an attacker/target pair into
+// the encounter state machine. An encounter starts at the first sample where the
+// target is visible and survives short occlusions (graceTicks samples), but the
+// exposure is only confirmed after confirmationTicks consecutive visible samples.
+// a and t are the attacker and target states at the time of the sample.
+func (c *demoStatsCollector) observeEncounter(key encounterKey, tick int, spotted bool, a, t playerFrameState) {
+	state := c.encounters[key]
+	if !spotted {
+		if state == nil {
+			return
+		}
+		state.spottedTicks = 0
+		state.unspottedTicks++
+		if state.unspottedTicks >= c.graceTicks {
+			c.dropEncounter(key)
+		}
+		return
+	}
+	if state == nil {
+		state = &encounterState{firstTick: tick, firstShotTick: -1, firstAngle: angularError(a, t), distance: distanceMeters(a, t)}
+		c.encounters[key] = state
+	}
+	state.unspottedTicks = 0
+	state.spottedTicks++
+	if state.confirmedTick == 0 && state.spottedTicks >= c.confirmationTicks {
+		state.confirmedTick = tick
+		state.confirmedAngle = angularError(a, t)
+	}
 }
 
 func validAimWeapon(name constants.WeaponName) bool {
@@ -413,12 +519,13 @@ func validAimWeapon(name constants.WeaponName) bool {
 }
 
 func (c *demoStatsCollector) onShot(analyzer *Analyzer, shot *Shot) {
+	c.syncRound(analyzer)
 	if shot.PlayerSteamID64 == 0 || !validAimWeapon(shot.WeaponName) {
 		return
 	}
-	stats := c.player(shot.PlayerSteamID64, shot.PlayerName)
+	stats := c.player(shot.RoundNumber, shot.PlayerSteamID64, shot.PlayerName)
 	stats.Shots++
-	c.weapon(shot.PlayerSteamID64, shot.WeaponName).Shots++
+	c.weapon(shot.RoundNumber, shot.PlayerSteamID64, shot.WeaponName).Shots++
 	frame := c.frames[shot.PlayerSteamID64]
 	moving := frame.speed > 80
 	if moving {
@@ -433,7 +540,7 @@ func (c *demoStatsCollector) onShot(analyzer *Analyzer, shot *Shot) {
 	if frame.scoped {
 		stats.ScopedShots++
 	}
-	c.shots[shot.PlayerSteamID64] = append(c.shots[shot.PlayerSteamID64], &trackedShot{tick: shot.Tick, weaponID: shot.WeaponID, moving: moving, airborne: frame.airborne, flashed: frame.flashed, scoped: frame.scoped})
+	c.shots[shot.PlayerSteamID64] = append(c.shots[shot.PlayerSteamID64], &trackedShot{round: shot.RoundNumber, tick: shot.Tick, weaponID: shot.WeaponID, moving: moving, airborne: frame.airborne, flashed: frame.flashed, scoped: frame.scoped})
 	if pending := c.pendingDamage[shot.PlayerSteamID64]; len(pending) > 0 {
 		remaining := pending[:0]
 		for _, damage := range pending {
@@ -477,8 +584,8 @@ func (c *demoStatsCollector) onShot(analyzer *Analyzer, shot *Shot) {
 		if selected.firstAngle-selected.firstShotAngle >= 15 && durationMS <= 100 && selected.firstShotAngle <= 2 {
 			selected.snap = true
 			stats.SnapEvents++
-			c.result.Evidence = append(c.result.Evidence, DemoEvidence{
-				RoundNumber: analyzer.currentRound.Number, Tick: shot.Tick, SteamID64: selectedKey.attacker, VictimID: selectedKey.target,
+			c.round(shot.RoundNumber).evidence = append(c.round(shot.RoundNumber).evidence, DemoEvidence{
+				RoundNumber: shot.RoundNumber, Tick: shot.Tick, SteamID64: selectedKey.attacker, VictimID: selectedKey.target,
 				Kind: "snap", Value: selected.firstAngle - selected.firstShotAngle, Details: "aim reduction in <=100ms before first shot",
 			})
 		}
@@ -508,7 +615,7 @@ func (c *demoStatsCollector) markHitShot(damage *Damage) bool {
 				continue
 			}
 			shot.hit = true
-			player := c.player(damage.AttackerSteamID64, "")
+			player := c.player(shot.round, damage.AttackerSteamID64, "")
 			player.HitShots++
 			if shot.moving {
 				player.MovingHitShots++
@@ -522,7 +629,7 @@ func (c *demoStatsCollector) markHitShot(damage *Damage) bool {
 			if shot.scoped {
 				player.ScopedHitShots++
 			}
-			c.weapon(damage.AttackerSteamID64, damage.WeaponName).HitShots++
+			c.weapon(shot.round, damage.AttackerSteamID64, damage.WeaponName).HitShots++
 			return true
 		}
 		return false
@@ -536,12 +643,14 @@ func (c *demoStatsCollector) markHitShot(damage *Damage) bool {
 }
 
 func (c *demoStatsCollector) onDamage(analyzer *Analyzer, damage *Damage) {
+	c.syncRound(analyzer)
 	if damage.AttackerSteamID64 == 0 || damage.AttackerSteamID64 == damage.VictimSteamID64 || damage.AttackerSide == damage.VictimSide || !validAimWeapon(damage.WeaponName) {
 		return
 	}
-	stats := c.player(damage.AttackerSteamID64, "")
+	stats := c.player(damage.RoundNumber, damage.AttackerSteamID64, "")
+	round := c.round(damage.RoundNumber)
 	stats.DamageEvents++
-	weaponStats := c.weapon(damage.AttackerSteamID64, damage.WeaponName)
+	weaponStats := c.weapon(damage.RoundNumber, damage.AttackerSteamID64, damage.WeaponName)
 	weaponStats.DamageEvents++
 	if damage.HitGroup == events.HitGroupHead {
 		stats.HeadHitEvents++
@@ -555,7 +664,7 @@ func (c *demoStatsCollector) onDamage(analyzer *Analyzer, damage *Damage) {
 	encounter := c.encounters[key]
 	if encounter == nil || encounter.confirmedTick == 0 {
 		stats.UnspottedDamageEvents++
-		c.result.Evidence = append(c.result.Evidence, DemoEvidence{
+		round.evidence = append(round.evidence, DemoEvidence{
 			RoundNumber: damage.RoundNumber, Tick: damage.Tick, SteamID64: damage.AttackerSteamID64, VictimID: damage.VictimSteamID64,
 			Kind: "damage_without_confirmed_spot", Value: float64(damage.HealthDamage), Details: damage.WeaponName.String(),
 		})
@@ -571,12 +680,15 @@ func (c *demoStatsCollector) onDamage(analyzer *Analyzer, damage *Damage) {
 		return
 	}
 	firstShotMS := float64(-1)
+	// -1 means no shot was attributed: 0° would read as a perfect aim.
+	firstShotAngle := float64(-1)
 	// Fall back to the damage tick when no shot was attributed to this
 	// encounter (player_hurt can arrive before weapon_fire in the same tick,
 	// or the shot was attributed to another encounter); a hitscan hit implies
 	// a shot at the damage tick, keeping reaction <= TTD per encounter.
 	reactionMS := ttd
 	if encounter.firstShotTick >= 0 {
+		firstShotAngle = encounter.firstShotAngle
 		firstShotMS = c.tickDeltaMS(analyzer, encounter.confirmedTick, encounter.firstShotTick)
 		reactionMS = c.tickDeltaMS(analyzer, encounter.firstTick, encounter.firstShotTick)
 		if encounter.shotCount == 1 && damage.Tick-encounter.firstShotTick <= 2 && damage.HitGroup == events.HitGroupHead {
@@ -585,35 +697,115 @@ func (c *demoStatsCollector) onDamage(analyzer *Analyzer, damage *Damage) {
 	}
 	stats.TTDSamples++
 	stats.TTDSumMS += ttd
-	c.result.Encounters = append(c.result.Encounters, DemoEncounter{
+	round.encounters = append(round.encounters, DemoEncounter{
 		RoundNumber: damage.RoundNumber, AttackerSteamID64: damage.AttackerSteamID64, VictimSteamID64: damage.VictimSteamID64,
 		FirstSpottedTick: encounter.firstTick, ConfirmedTick: encounter.confirmedTick, DamageTick: damage.Tick,
 		TTDMS: ttd, TTDConfirmedMS: ttdConfirmed, FirstShotTimeMS: firstShotMS, ReactionTimeMS: reactionMS,
-		FirstAngle: encounter.firstAngle, ConfirmedAngle: encounter.confirmedAngle, FirstShotAngle: encounter.firstShotAngle,
+		FirstAngle: encounter.firstAngle, ConfirmedAngle: encounter.confirmedAngle, FirstShotAngle: firstShotAngle,
 		DistanceMeters: encounter.distance, WeaponName: damage.WeaponName.String(), Snap: encounter.snap,
 	})
 	if ttd >= 0 && ttd <= 190 {
-		c.result.Evidence = append(c.result.Evidence, DemoEvidence{
+		round.evidence = append(round.evidence, DemoEvidence{
 			RoundNumber: damage.RoundNumber, Tick: damage.Tick, SteamID64: damage.AttackerSteamID64, VictimID: damage.VictimSteamID64,
 			Kind: "fast_ttd", Value: ttd, Details: damage.WeaponName.String(),
 		})
 	}
 }
 
+func addPlayerStats(dst, src *DemoPlayerStats) {
+	dst.Shots += src.Shots
+	dst.HitShots += src.HitShots
+	dst.DamageEvents += src.DamageEvents
+	dst.HeadHitEvents += src.HeadHitEvents
+	dst.UnspottedDamageEvents += src.UnspottedDamageEvents
+	dst.FirstBulletEncounters += src.FirstBulletEncounters
+	dst.FirstBulletHeadHits += src.FirstBulletHeadHits
+	dst.SnapEvents += src.SnapEvents
+	dst.TTDSamples += src.TTDSamples
+	dst.TTDSumMS += src.TTDSumMS
+	dst.MovingShots += src.MovingShots
+	dst.MovingHitShots += src.MovingHitShots
+	dst.AirborneShots += src.AirborneShots
+	dst.AirborneHitShots += src.AirborneHitShots
+	dst.FlashedShots += src.FlashedShots
+	dst.FlashedHitShots += src.FlashedHitShots
+	dst.ScopedShots += src.ScopedShots
+	dst.ScopedHitShots += src.ScopedHitShots
+}
+
+// finalize builds the demo result from the rounds the match kept. Rounds that
+// were dropped from the match (incomplete, restored, restarted) contribute
+// nothing, so shots, damage and encounters cover the same events as the match.
 func (c *demoStatsCollector) finalize(match *Match) {
+	accepted := make(map[int]bool, len(match.Rounds))
+	for _, round := range match.Rounds {
+		accepted[round.Number] = true
+	}
+	result := DemoStats{
+		Players: make(map[uint64]*DemoPlayerStats),
+		Weapons: make(map[uint64]map[string]*DemoWeaponStats),
+	}
+	player := func(id uint64) *DemoPlayerStats {
+		stats := result.Players[id]
+		if stats == nil {
+			stats = &DemoPlayerStats{SteamID64: id, Name: c.names[id]}
+			result.Players[id] = stats
+		}
+		return stats
+	}
+	weapon := func(id uint64, name string) *DemoWeaponStats {
+		weapons := result.Weapons[id]
+		if weapons == nil {
+			weapons = make(map[string]*DemoWeaponStats)
+			result.Weapons[id] = weapons
+		}
+		stats := weapons[name]
+		if stats == nil {
+			stats = &DemoWeaponStats{SteamID64: id, WeaponName: name}
+			weapons[name] = stats
+		}
+		return stats
+	}
+
+	roundNumbers := make([]int, 0, len(c.rounds))
+	for number := range c.rounds {
+		if accepted[number] {
+			roundNumbers = append(roundNumbers, number)
+		}
+	}
+	sort.Ints(roundNumbers)
+	for _, number := range roundNumbers {
+		round := c.rounds[number]
+		for id, stats := range round.players {
+			addPlayerStats(player(id), stats)
+		}
+		for id, weapons := range round.weapons {
+			for name, stats := range weapons {
+				total := weapon(id, name)
+				total.Shots += stats.Shots
+				total.HitShots += stats.HitShots
+				total.DamageEvents += stats.DamageEvents
+				total.HeadHitEvents += stats.HeadHitEvents
+			}
+		}
+		result.Encounters = append(result.Encounters, round.encounters...)
+		result.Evidence = append(result.Evidence, round.evidence...)
+	}
+
 	rounds := len(match.Rounds)
-	for _, player := range match.Players() {
-		stats := c.player(player.SteamID64, player.Name)
+	for _, matchPlayer := range match.Players() {
+		stats := player(matchPlayer.SteamID64)
+		stats.Name = matchPlayer.Name
 		stats.Rounds = rounds
-		stats.Kills = player.KillCount()
-		stats.Deaths = player.DeathCount()
-		stats.HeadshotKills = player.HeadshotCount()
+		stats.Kills = matchPlayer.KillCount()
+		stats.Deaths = matchPlayer.DeathCount()
+		stats.HeadshotKills = matchPlayer.HeadshotCount()
 	}
 	for _, kill := range match.Kills {
 		if kill.KillerSteamID64 == 0 || kill.IsSuicide() || kill.IsTeamKill() {
 			continue
 		}
-		stats := c.player(kill.KillerSteamID64, kill.KillerName)
+		stats := player(kill.KillerSteamID64)
 		if kill.IsThroughSmoke {
 			stats.SmokeKills++
 		}
@@ -621,12 +813,12 @@ func (c *demoStatsCollector) finalize(match *Match) {
 			stats.WallKills++
 		}
 		if validAimWeapon(kill.WeaponName) {
-			c.weapon(kill.KillerSteamID64, kill.WeaponName).Kills++
+			weapon(kill.KillerSteamID64, kill.WeaponName.String()).Kills++
 		}
 	}
 	// Keep report and database output stable.
-	sort.Slice(c.result.Encounters, func(i, j int) bool {
-		a, b := c.result.Encounters[i], c.result.Encounters[j]
+	sort.SliceStable(result.Encounters, func(i, j int) bool {
+		a, b := result.Encounters[i], result.Encounters[j]
 		if a.RoundNumber != b.RoundNumber {
 			return a.RoundNumber < b.RoundNumber
 		}
@@ -635,4 +827,5 @@ func (c *demoStatsCollector) finalize(match *Match) {
 		}
 		return a.AttackerSteamID64 < b.AttackerSteamID64
 	})
+	c.result = result
 }

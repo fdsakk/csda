@@ -16,6 +16,7 @@ import (
 	"os"
 	urlpath "path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -163,6 +164,9 @@ func NewServer(options Options) (*Server, error) {
 	if err := os.MkdirAll(options.UploadsPath, 0o755); err != nil {
 		return nil, err
 	}
+	// Jobs only live in memory, so any upload folder found at startup belongs to
+	// a run that was killed before it could clean up.
+	removeOrphanedUploads(options.UploadsPath)
 	ctx, cancel := context.WithCancel(context.Background())
 	server := &Server{options: options, mux: http.NewServeMux(), jobs: make(map[string]*Job), queue: make(chan string, 32), subscribers: make(map[chan []byte]struct{}), ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	server.routes()
@@ -170,8 +174,45 @@ func NewServer(options Options) (*Server, error) {
 	go func() {
 		defer close(server.done)
 		server.worker()
+		server.abandonQueuedJobs()
 	}()
 	return server, nil
+}
+
+// uploadFolderName matches the random job folders created by handleUpload.
+var uploadFolderName = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
+func removeOrphanedUploads(root string) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && uploadFolderName.MatchString(entry.Name()) {
+			_ = os.RemoveAll(filepath.Join(root, entry.Name()))
+		}
+	}
+}
+
+// abandonQueuedJobs runs once the worker has stopped: jobs still waiting in the
+// queue will never be analyzed, so mark them and delete their uploads.
+func (s *Server) abandonQueuedJobs() {
+	for {
+		select {
+		case id := <-s.queue:
+			s.mu.Lock()
+			if job := s.jobs[id]; job != nil && job.Status == JobQueued {
+				now := time.Now().UTC()
+				job.Status = JobFailed
+				job.EndedAt = &now
+				job.Error = "interrupted: the server was stopped before the analysis started"
+			}
+			s.mu.Unlock()
+			_ = os.RemoveAll(filepath.Join(s.options.UploadsPath, id))
+		default:
+			return
+		}
+	}
 }
 
 func (s *Server) Close() {
@@ -461,13 +502,25 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	job := &Job{ID: id, Status: JobQueued, Files: uploads.names, CreatedAt: time.Now().UTC(), Total: len(uploads.paths), paths: uploads.paths, source: source}
+	// Copy the job while holding the lock: once it is queued the worker owns
+	// its status fields.
 	s.mu.Lock()
 	s.jobs[id] = job
+	accepted := publicJob(job)
 	s.mu.Unlock()
 	select {
 	case s.queue <- id:
-		writeJSON(w, http.StatusAccepted, publicJob(job))
+		writeJSON(w, http.StatusAccepted, accepted)
+	case <-r.Context().Done():
+		// The client left while the queue was full.
+		s.mu.Lock()
+		delete(s.jobs, id)
+		s.mu.Unlock()
+		cleanup()
 	case <-s.ctx.Done():
+		s.mu.Lock()
+		delete(s.jobs, id)
+		s.mu.Unlock()
 		cleanup()
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "server is shutting down"})
 	}
@@ -682,7 +735,10 @@ func (s *Server) worker() {
 			end := time.Now().UTC()
 			job.EndedAt = &end
 			job.Result = result
-			if err != nil {
+			if s.ctx.Err() != nil {
+				job.Status = JobFailed
+				job.Error = "interrupted: the server was stopped during the analysis"
+			} else if err != nil {
 				job.Status = JobFailed
 				job.Error = err.Error()
 			} else if result.Failed > 0 {

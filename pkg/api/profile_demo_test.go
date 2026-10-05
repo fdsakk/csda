@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -12,7 +13,7 @@ func TestProfileDemoAnalysis(t *testing.T) {
 	if path == "" {
 		t.Skip("CSDA_PROFILE_DEMO not set")
 	}
-	result := analyzeOneDemoForStats(path, PlayerStatsBuildOptions{Source: "valve", TrisDir: "../../tris"})
+	result := analyzeOneDemoForStats(context.Background(), path, PlayerStatsBuildOptions{Source: "valve", TrisDir: "../../tris"}, "profile")
 	if result.err != nil {
 		t.Fatal(result.err)
 	}

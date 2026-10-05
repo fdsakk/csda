@@ -222,7 +222,7 @@ Export a demo in a specific folder into a minified JSON file including entities 
 
 ### Multi-demo player statistics
 
-Build a persistent SQLite database from individual demos and folders. Players are merged by SteamID and demos are deduplicated by checksum.
+Build a persistent SQLite database from individual demos and folders. Players are merged by SteamID. A demo is identified by the SHA-256 of the whole file: the same file is analyzed once whatever its name, and different matches that share a name and map are kept apart. Databases written by earlier versions identify demos by a weaker header checksum; re-analyzing such a demo replaces its old row only when that checksum, the file name and the map all match. A corrupted or empty `.dem` fails only its own analysis and is reported in the result.
 
 ```bash
 csda stats ingest --db=player-stats.db --demo=match1.dem --demo-dir=./demos
@@ -231,7 +231,7 @@ csda stats report --db=player-stats.db --output=./stats-report --format=csv
 
 `stats build` combines both operations. The report contains aggregated player and weapon statistics, estimated Time to Damage (TTD), estimated Reaction Time, a 0–100 evidence score with two review tiers (`watch` = grey zone, `cheater` = not humanly reproducible over many games), and evidence rows pointing to demo rounds and ticks. Timing is required to produce a non-zero review score; accuracy, head-hit rate and K/D can only add bounded support because they are also explained by legitimate skill. It is intended to prioritize manual review and is not a cheating probability or automatic verdict.
 
-TTD measures the first spotted tick to first damage. Reaction Time measures the first spotted tick to first shot. In both cases three consecutive spotted ticks are required to validate the exposure, but timing starts at the first tick; samples outside `0–1000 ms` are excluded. The primary multi-demo value is the round-weighted average of each demo's median, while pooled median and P10 remain available in JSON/CSV. These are demo-derived estimates, not geometry-backed line-of-sight measurements.
+TTD measures the first spotted tick to first damage. Reaction Time measures the first spotted tick to first shot. An encounter starts at the first spotted tick and survives short occlusions (about half a second); the exposure is validated by three consecutive spotted ticks, but timing starts at the first tick. Encounters end at death, disconnect and round change, and a flashed attacker counts as not seeing the target; samples outside `0–1000 ms` are excluded. The primary multi-demo value is the round-weighted average of each demo's median, while pooled median and P10 remain available in JSON/CSV. These are demo-derived estimates, not geometry-backed line-of-sight measurements.
 
 Each analyzed demo also receives a conservative timing-quality check. If low TTD and reaction medians appear across at least four sufficiently sampled players, the demo is automatically disabled in aggregates. It remains visible in the Demos dialog and can be manually enabled. Existing databases are checked once during migration.
 
@@ -270,7 +270,7 @@ csda web --db=player-stats.db --uploads=uploads --assets=web/dist --source=valve
 The `--assets` option is optional. Without it, `csda web` serves the dashboard
 embedded at compile time.
 
-Open `http://127.0.0.1:8080`. Drop one or more `.dem` files into the upload area; uploads are analyzed sequentially in the background, deduplicated by checksum, and added to the same SQLite player database. Job progress is streamed over Server-Sent Events and the table refreshes automatically after each completed job; failed jobs stay listed with their error until dismissed.
+Open `http://127.0.0.1:8080`. Drop one or more `.dem` files into the upload area; uploads are analyzed in the background, deduplicated by the SHA-256 of the file, and added to the same SQLite player database. Job progress is streamed over Server-Sent Events and the table refreshes automatically after each completed job; failed jobs stay listed with their error until dismissed.
 
 Uploaded `.dem` files are deleted automatically once their analysis finishes — the statistics live in the database. Re-analyzing a demo after an algorithm update therefore requires uploading the file again.
 
