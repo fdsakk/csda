@@ -70,5 +70,8 @@ jobs:
         working-directory: web
         run: bun run build
 
-      - name: Test player stats, web server, and application packages
-        run: go test ./pkg/api ./pkg/web ./pkg/cli
+      - name: Vet
+        run: go vet ./cmd/... ./pkg/... ./internal/...
+
+      - name: Test player stats, web server, geometry and application packages
+        run: go test -race ./pkg/... ./internal/...

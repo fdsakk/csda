@@ -68,6 +68,9 @@ build-all: build-web ## Run for all platforms, embedding the production dashboar
 test: ## Run all tests
 	go test ./tests/ $(ARGS)
 
+test-unit: ## Run unit tests with the race detector (no demos needed)
+	go test -race ./pkg/... ./internal/... $(ARGS)
+
 test-csgo: ## Run CS:GO tests
 	go test ./tests/ -run TestDemos/csgo $(ARGS)
 
@@ -78,7 +81,7 @@ test-verbose: ## Run tests in verbose
 	@"$(MAKE)" --no-print-directory ARGS=-v test
 
 vet: ## Run go vet
-	go vet ./cmd/... ./pkg/...
+	go vet ./cmd/... ./pkg/... ./internal/...
 
 clean: ## Clean up project files
 	rm -rf bin
