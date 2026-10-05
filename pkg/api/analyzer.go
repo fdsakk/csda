@@ -296,6 +296,7 @@ func analyzeDemoUnsafe(demoPath string, options AnalyzeDemoOptions) (*Match, err
 	match.deleteIncompleteRounds()
 	match.computeResultStats()
 	if analyzer.playerStatsCollector != nil {
+		analyzer.playerStatsCollector.resolveDeferredDamage(analyzer)
 		analyzer.playerStatsCollector.finalize(&match)
 	}
 

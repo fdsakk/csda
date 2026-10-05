@@ -157,3 +157,45 @@ func TestRealDemoWithoutGeometryFailsBeforeParsing(t *testing.T) {
 		t.Fatalf("took %s, the geometry check must run before the parser", elapsed)
 	}
 }
+
+// player_hurt precedes weapon_fire within a tick, so the shot that caused a hit
+// is only known after the damage event. Every hit must still be attributed to
+// the shot fired in its own tick.
+func TestRealDemoHitsAreAttributedToTheirShot(t *testing.T) {
+	for _, path := range realDemos(t) {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			match, stats := analyzeRealDemo(t, path)
+			type attackerTick struct {
+				attacker uint64
+				tick     int
+			}
+			shotTicks := make(map[attackerTick]bool)
+			for _, shot := range match.Shots {
+				shotTicks[attackerTick{shot.PlayerSteamID64, shot.Tick}] = true
+			}
+			// One bullet can hit several players (penetration): it is attributed to
+			// one encounter only, so the others legitimately stay without a shot.
+			hitsInTick := make(map[attackerTick]int)
+			for _, e := range stats.Encounters {
+				hitsInTick[attackerTick{e.AttackerSteamID64, e.DamageTick}]++
+			}
+			withoutShot, unexplained := 0, 0
+			for _, e := range stats.Encounters {
+				if e.FirstShotTimeMS >= 0 {
+					if e.ReactionTimeMS > e.TTDMS {
+						t.Errorf("round %d: reaction %.1f ms is longer than the time to damage %.1f ms", e.RoundNumber, e.ReactionTimeMS, e.TTDMS)
+					}
+					continue
+				}
+				withoutShot++
+				if key := (attackerTick{e.AttackerSteamID64, e.DamageTick}); shotTicks[key] && hitsInTick[key] < 2 {
+					unexplained++
+				}
+			}
+			if unexplained > 0 {
+				t.Errorf("%d of %d encounters without a shot have a shot of the attacker in the damage tick and no other hit in it", unexplained, withoutShot)
+			}
+			t.Logf("%d encounters, %d without an attributed shot", len(stats.Encounters), withoutShot)
+		})
+	}
+}

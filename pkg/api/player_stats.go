@@ -22,7 +22,10 @@ import (
 
 // Version 7: statistics are computed per accepted round, encounters follow a
 // strict lifecycle, and demos are identified by the SHA-256 of the whole file.
-const playerStatsAnalysisVersion = 7
+// Version 8: a shot fired in the same tick as the hit that ended the encounter
+// is attributed to it (player_hurt precedes weapon_fire within a tick), which
+// fixes the first-shot, first-bullet and snap statistics.
+const playerStatsAnalysisVersion = 8
 
 type DemoImportError struct {
 	Path  string `json:"path"`

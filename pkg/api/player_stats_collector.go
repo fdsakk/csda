@@ -167,6 +167,11 @@ type demoStatsCollector struct {
 	encounters        map[encounterKey]*encounterState
 	shots             map[uint64][]*trackedShot
 	pendingDamage     map[uint64][]*Damage
+	// deferredDamage holds the damage events of the current tick whose
+	// encounter is resolved once the tick is complete: the demos emit
+	// player_hurt before weapon_fire within a tick, so the shot that caused a
+	// hit is only known after the damage event.
+	deferredDamage []*Damage
 	// liveRound is the round the live state above belongs to; the state is
 	// dropped as soon as the analyzer moves on to another round.
 	liveRound     *Round
@@ -199,12 +204,15 @@ func (c *demoStatsCollector) resetLiveState() {
 	c.encounters = make(map[encounterKey]*encounterState)
 	c.shots = make(map[uint64][]*trackedShot)
 	c.pendingDamage = make(map[uint64][]*Damage)
+	c.deferredDamage = nil
 }
 
 // syncRound drops the live state (running encounters, shot buffers, smokes)
 // when the analyzer started a new round.
 func (c *demoStatsCollector) syncRound(analyzer *Analyzer) {
 	if c.liveRound != analyzer.currentRound {
+		// damage received in the old round is resolved with the old round's state
+		c.resolveDeferredDamage(analyzer)
 		c.liveRound = analyzer.currentRound
 		c.resetLiveState()
 	}
@@ -374,6 +382,9 @@ func (c *demoStatsCollector) visible(a, t playerFrameState, attacker, target *co
 }
 
 func (c *demoStatsCollector) onFrame(analyzer *Analyzer) {
+	// All events of the finished tick are known now: resolve its damage before
+	// this frame changes the encounter state.
+	c.resolveDeferredDamage(analyzer)
 	c.syncRound(analyzer)
 	if !c.visLoadAttempted {
 		c.visLoadAttempted = true
@@ -577,19 +588,36 @@ func (c *demoStatsCollector) onShot(analyzer *Analyzer, shot *Shot) {
 		if selected.firstShotTick >= 0 {
 			return
 		}
-		selected.firstShotTick = shot.Tick
-		selected.firstShotAngle = angularError(selectedAttacker, selectedTarget)
-		stats.FirstBulletEncounters++
-		durationMS := c.tickDeltaMS(analyzer, selected.firstTick, shot.Tick)
-		if selected.firstAngle-selected.firstShotAngle >= 15 && durationMS <= 100 && selected.firstShotAngle <= 2 {
-			selected.snap = true
-			stats.SnapEvents++
-			c.round(shot.RoundNumber).evidence = append(c.round(shot.RoundNumber).evidence, DemoEvidence{
-				RoundNumber: shot.RoundNumber, Tick: shot.Tick, SteamID64: selectedKey.attacker, VictimID: selectedKey.target,
-				Kind: "snap", Value: selected.firstAngle - selected.firstShotAngle, Details: "aim reduction in <=100ms before first shot",
-			})
+		c.registerFirstShot(analyzer, selectedKey, selected, shot.RoundNumber, shot.Tick, selectedAttacker, selectedTarget)
+	}
+}
+
+// registerFirstShot records tick as the first shot fired at an encounter, and
+// derives the first-bullet and snap statistics from the aim at that moment.
+func (c *demoStatsCollector) registerFirstShot(analyzer *Analyzer, key encounterKey, encounter *encounterState, round, tick int, attacker, target playerFrameState) {
+	encounter.firstShotTick = tick
+	encounter.firstShotAngle = angularError(attacker, target)
+	c.player(round, key.attacker, "").FirstBulletEncounters++
+	durationMS := c.tickDeltaMS(analyzer, encounter.firstTick, tick)
+	if encounter.firstAngle-encounter.firstShotAngle >= 15 && durationMS <= 100 && encounter.firstShotAngle <= 2 {
+		encounter.snap = true
+		c.player(round, key.attacker, "").SnapEvents++
+		c.round(round).evidence = append(c.round(round).evidence, DemoEvidence{
+			RoundNumber: round, Tick: tick, SteamID64: key.attacker, VictimID: key.target,
+			Kind: "snap", Value: encounter.firstAngle - encounter.firstShotAngle, Details: "aim reduction in <=100ms before first shot",
+		})
+	}
+}
+
+// firedInTick reports whether the player fired a recorded shot in tick.
+func (c *demoStatsCollector) firedInTick(attacker uint64, round, tick int) bool {
+	shots := c.shots[attacker]
+	for i := len(shots) - 1; i >= 0 && shots[i].tick >= tick; i-- {
+		if shots[i].tick == tick && shots[i].round == round {
+			return true
 		}
 	}
+	return false
 }
 
 func (c *demoStatsCollector) tickDeltaMS(analyzer *Analyzer, from, to int) float64 {
@@ -648,7 +676,6 @@ func (c *demoStatsCollector) onDamage(analyzer *Analyzer, damage *Damage) {
 		return
 	}
 	stats := c.player(damage.RoundNumber, damage.AttackerSteamID64, "")
-	round := c.round(damage.RoundNumber)
 	stats.DamageEvents++
 	weaponStats := c.weapon(damage.RoundNumber, damage.AttackerSteamID64, damage.WeaponName)
 	weaponStats.DamageEvents++
@@ -660,6 +687,22 @@ func (c *demoStatsCollector) onDamage(analyzer *Analyzer, damage *Damage) {
 		c.pendingDamage[damage.AttackerSteamID64] = append(c.pendingDamage[damage.AttackerSteamID64], damage)
 	}
 
+	c.deferredDamage = append(c.deferredDamage, damage)
+}
+
+// resolveDeferredDamage turns the damage events of the finished tick into
+// encounter samples.
+func (c *demoStatsCollector) resolveDeferredDamage(analyzer *Analyzer) {
+	deferred := c.deferredDamage
+	c.deferredDamage = nil
+	for _, damage := range deferred {
+		c.resolveEncounterDamage(analyzer, damage)
+	}
+}
+
+func (c *demoStatsCollector) resolveEncounterDamage(analyzer *Analyzer, damage *Damage) {
+	stats := c.player(damage.RoundNumber, damage.AttackerSteamID64, "")
+	round := c.round(damage.RoundNumber)
 	key := encounterKey{attacker: damage.AttackerSteamID64, target: damage.VictimSteamID64}
 	encounter := c.encounters[key]
 	if encounter == nil || encounter.confirmedTick == 0 {
@@ -674,6 +717,17 @@ func (c *demoStatsCollector) onDamage(analyzer *Analyzer, damage *Damage) {
 		return
 	}
 	encounter.reacted = true
+	if encounter.firstShotTick < 0 {
+		// The shot may have been given to another target (the one closest to the
+		// crosshair), or one bullet hit several players. The victim of a hit is
+		// known, so take the shot fired in the tick of the hit.
+		a, aok := c.frames[damage.AttackerSteamID64]
+		t, tok := c.frames[damage.VictimSteamID64]
+		if aok && tok && c.firedInTick(damage.AttackerSteamID64, damage.RoundNumber, damage.Tick) {
+			encounter.shotCount++
+			c.registerFirstShot(analyzer, key, encounter, damage.RoundNumber, damage.Tick, a, t)
+		}
+	}
 	ttd := c.tickDeltaMS(analyzer, encounter.firstTick, damage.Tick)
 	ttdConfirmed := c.tickDeltaMS(analyzer, encounter.confirmedTick, damage.Tick)
 	if ttdConfirmed < 0 {
