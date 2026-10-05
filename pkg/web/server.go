@@ -513,7 +513,6 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	case s.queue <- id:
 		writeJSON(w, http.StatusAccepted, accepted)
 	case <-r.Context().Done():
-		// The client left while the queue was full.
 		s.mu.Lock()
 		delete(s.jobs, id)
 		s.mu.Unlock()
@@ -524,6 +523,14 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		cleanup()
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "server is shutting down"})
+	default:
+		// Reject instead of waiting: waiting would hold uploadsMu and block every
+		// other upload until a running analysis finishes.
+		s.mu.Lock()
+		delete(s.jobs, id)
+		s.mu.Unlock()
+		cleanup()
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "the analysis queue is full, try again when a running analysis has finished"})
 	}
 }
 
