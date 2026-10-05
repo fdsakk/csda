@@ -56,6 +56,6 @@ Loading the map geometry costs about 5 s per process; the cache is kept for the 
 
 ### Earlier numbers
 
-The first version of this file reported 161 MiB / 58 s for the same batch with `jobs=1`. These values could not be reproduced: the original code (`174767c`, before the changes of this phase) measures 747 MiB on the same batch today, against 737 MiB for the final version. The figures above replace the earlier ones. The difference between versions is below 3% for the batch (and +10% for the single 155 MiB demo, from loading the geometry before parsing).
+The first version of this file reported 161 MiB / 58 s for the same batch with `jobs=1`. These values could not be reproduced: the original code (`174767c`, before the changes of this phase) measures 747 MiB on the same batch today, against 737 MiB for the final version. The figures above replace the earlier ones. The difference between the two versions is 1.4% for the batch. For the single 155 MiB demo the peak grew by 10% (373 to 411 MiB) between `174767c` and `797cd7d`; the cause was not isolated (the geometry is now loaded before parsing, which is one candidate).
 
 Not measured: a cold page cache, machines other than the one above.
