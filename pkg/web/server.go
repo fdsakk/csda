@@ -261,6 +261,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /api/demos/{checksum}", s.handleDemoToggle)
 	s.mux.HandleFunc("DELETE /api/demos/{checksum}", s.handleDemoDelete)
 	s.mux.HandleFunc("PATCH /api/players/{steamId}", s.handlePlayerSaved)
+	s.mux.HandleFunc("GET /api/players/{steamId}/encounters", s.handlePlayerEncounters)
 	s.mux.HandleFunc("GET /api/export", s.handleExport)
 	s.mux.HandleFunc("POST /api/import", s.handleImport)
 	s.mux.HandleFunc("/", s.handleStatic)
@@ -656,6 +657,26 @@ func (s *Server) handlePlayerSaved(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handlePlayerEncounters lists the encounters behind a player's aggregated
+// timings, with the ticks needed to find them in the original demo.
+func (s *Server) handlePlayerEncounters(w http.ResponseWriter, r *http.Request) {
+	steamID, err := strconv.ParseUint(r.PathValue("steamId"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid steam id"})
+		return
+	}
+	encounters, err := api.GetPlayerEncounters(r.Context(), s.options.DatabasePath, steamID)
+	if errors.Is(err, api.ErrPlayerNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "player not found"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"encounters": encounters})
 }
 
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {

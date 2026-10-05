@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -459,4 +460,55 @@ func TestConcurrentUploadsAndJobListing(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestPlayerEncountersEndpoint(t *testing.T) {
+	server := newTestServer(t)
+	payload := `{"format":"cs-demo-analyzer/player-stats","version":2,"exportedAt":"2026-07-13T00:00:00Z","players":[{"steamId":"76561198000000001","latestName":"Alice","names":["Alice"]},{"steamId":"76561198000000002","latestName":"Bob","names":["Bob"]}],"demos":[{"checksum":"enc1","path":"a.dem","fileName":"a","mapName":"de_test","demoDate":"2026-01-01T00:00:00Z","tickRate":64,"buildNumber":1,"source":"valve","analysisVersion":7,"importedAt":"2026-07-13T00:00:00Z","playerStats":[{"steamId":"76561198000000001","rounds":10,"shots":50,"hitShots":25},{"steamId":"76561198000000002","rounds":10}],"encounters":[{"roundNumber":3,"attackerSteamId":"76561198000000001","victimSteamId":"76561198000000002","firstSpottedTick":640,"confirmedTick":643,"damageTick":650,"ttdMs":156.25,"ttdConfirmedMs":109.375,"firstShotTimeMs":-1,"reactionTimeMs":156.25,"firstAngle":4,"confirmedAngle":2,"firstShotAngle":-1,"distanceMeters":9.5,"weaponName":"AK-47","snap":false}],"weaponStats":[],"evidence":[]}]}`
+	if response := do(server, http.MethodPost, "/api/import", []byte(payload)); response.Code != http.StatusOK {
+		t.Fatalf("import status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	response := do(server, http.MethodGet, "/api/players/76561198000000001/encounters", nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Encounters []struct {
+			DemoChecksum      string   `json:"demoChecksum"`
+			RoundNumber       int      `json:"roundNumber"`
+			VictimSteamID     string   `json:"victimSteamId"`
+			VictimName        string   `json:"victimName"`
+			FirstSpottedTick  int      `json:"firstSpottedTick"`
+			FirstShotTick     *int     `json:"firstShotTick"`
+			DamageTick        int      `json:"damageTick"`
+			ReactionEstimated bool     `json:"reactionEstimated"`
+			FirstShotAngle    *float64 `json:"firstShotAngle"`
+		} `json:"encounters"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Encounters) != 1 {
+		t.Fatalf("body=%s", response.Body.String())
+	}
+	e := body.Encounters[0]
+	if e.DemoChecksum != "enc1" || e.RoundNumber != 3 || e.VictimSteamID != "76561198000000002" || e.VictimName != "Bob" || e.FirstSpottedTick != 640 || e.DamageTick != 650 {
+		t.Fatalf("encounter=%+v", e)
+	}
+	if !e.ReactionEstimated || e.FirstShotTick != nil || e.FirstShotAngle != nil {
+		t.Fatalf("an encounter without a recorded shot must report null shot fields: %+v", e)
+	}
+
+	// a player without encounters gets an empty list, not null
+	response = do(server, http.MethodGet, "/api/players/76561198000000002/encounters", nil)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"encounters":[]`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response = do(server, http.MethodGet, "/api/players/1/encounters", nil); response.Code != http.StatusNotFound {
+		t.Fatalf("unknown player status=%d, want 404", response.Code)
+	}
+	if response = do(server, http.MethodGet, "/api/players/abc/encounters", nil); response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid id status=%d, want 400", response.Code)
+	}
 }
